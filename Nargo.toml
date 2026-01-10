@@ -1,0 +1,8 @@
+[package]
+name = "apertrue_c2pa_verifier"
+type = "bin"
+authors = ["Apertrue Social"]
+compiler_version = ">=1.0.0"
+description = "ZK circuit for C2PA authenticity verification with privacy preservation"
+
+[dependencies]
