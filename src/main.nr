@@ -7,13 +7,16 @@
 ///
 /// Privacy: The circuit hides which specific camera/device signed the image,
 /// only proving it was from SOME trusted device in the trust list.
+///
+/// Note: ECDSA P-256 verification uses Noir's blackbox function which is
+/// implemented natively in Barretenberg, NOT as circuit constraints.
 
 use std::ecdsa_secp256r1::verify_signature;
 use std::hash::pedersen_hash;
 
 /// Maximum depth of the Merkle tree for the trust list
-/// 2^20 = ~1 million trusted signers capacity
-global MERKLE_TREE_DEPTH: u32 = 20;
+/// 2^10 = 1024 trusted signers capacity
+global MERKLE_TREE_DEPTH: u32 = 10;
 
 /// The main circuit entry point
 ///
@@ -48,7 +51,7 @@ fn main(
     merkle_path: [Field; MERKLE_TREE_DEPTH],
     merkle_indices: [Field; MERKLE_TREE_DEPTH]
 ) {
-    // Step 1: Verify the ECDSA P-256 signature
+    // Step 1: Verify the ECDSA P-256 signature (blackbox - native Barretenberg operation)
     // This proves the image was signed by the holder of this private key
     let signature_valid = verify_signature(
         public_key_x,
