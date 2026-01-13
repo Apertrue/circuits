@@ -1,4 +1,4 @@
-/// Apertrue C2PA Verifier Circuit v2.1 - With RSA Certificate Support
+/// Apertrue C2PA Verifier Circuit v2.2 - With RSA Certificate Support + Expiry Enforcement
 ///
 /// This circuit proves that:
 /// 1. An image has a valid C2PA COSE signature (leaf key signed content)
@@ -6,18 +6,26 @@
 /// 3. The intermediate CA is in the Oracle's promoted trust list (via Merkle proof)
 /// 4. The leaf pubkey used in COSE matches the pubkey in the signed certificate (SPKI binding)
 /// 5. The proof is bound to specific image content (nullifier prevents replay)
+/// 6. The certificate was valid at the time the proof was generated (expiry enforcement)
 ///
 /// Privacy: The circuit hides:
 /// - Which specific device signed the content (leaf identity)
 /// - Which intermediate CA issued the certificate (Merkle proof hides this)
 /// - The certificate chain details
 ///
-/// The verifier only sees: trust_list_root, content_hash, nullifier
+/// The verifier sees: trust_list_root, content_hash, nullifier, proof_timestamp, cert_not_before, cert_not_after
 ///
 /// Architecture: "Intermediate Promotion"
 /// - Instead of enumerating millions of device leaf keys, we promote ~50-100 intermediate CAs
 /// - The Oracle verifies intermediate -> root chains and publishes a Merkle tree
 /// - Client proves leaf was signed by a promoted intermediate
+///
+/// Revocation Strategy:
+/// - Revoked intermediates are removed from the Oracle trust list
+/// - The trust_list_root is updated to exclude revoked entries
+/// - Oracle publishes epochs (weekly) with fresh Merkle roots
+/// - No explicit non-membership proof needed in circuit - membership proof fails for revoked entries
+/// - Future: In-circuit non-membership proof against revoked set for finer control
 ///
 /// Algorithm Support:
 /// - COSE signature: ECDSA P-256 (ES256) only for now
@@ -54,6 +62,11 @@ fn main(
     trust_list_root: pub Field,
     content_hash: pub Field,
     nullifier: pub Field,
+    
+    // === PUBLIC: TIME-BOUND VALIDITY ===
+    proof_timestamp: pub Field,      // Unix timestamp (seconds) when proof was generated
+    cert_not_before: pub Field,      // Unix timestamp (seconds) - cert validity start
+    cert_not_after: pub Field,       // Unix timestamp (seconds) - cert validity end
 
     // === PRIVATE: ALGORITHM SELECTOR ===
     cert_algorithm: Field,
@@ -185,6 +198,13 @@ fn main(
     
     let expected_nullifier = pedersen_hash([content_hash, leaf_pubkey_hash]);
     assert(nullifier == expected_nullifier, "Invalid nullifier");
+
+    // ================================================================
+    // STEP 8: Verify certificate validity at proof time
+    // ================================================================
+    // Ensure proof_timestamp is within certificate validity window
+    assert(proof_timestamp >= cert_not_before, "Certificate not yet valid at proof time");
+    assert(proof_timestamp <= cert_not_after, "Certificate expired at proof time");
 }
 
 /// Convert 32 bytes to Field (big-endian)
