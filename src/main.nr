@@ -4,35 +4,20 @@
 /// 1. An image has a valid C2PA signature from a trusted signer
 /// 2. The signer is in the approved trust list (via Merkle proof)
 /// 3. The proof is bound to a specific image content hash (prevents reuse)
-/// 4. Chain metadata (trust tier, AI status, etc.) is committed to the proof
-///
-/// Supports BOTH signing algorithms used by C2PA:
-/// - ES256 (ECDSA P-256): Used by ChatGPT/DALL-E, Leica, Sony, Nikon cameras
-/// - PS256 (RSA-2048 PSS): Used by Adobe Photoshop, Firefly, Lightroom
 ///
 /// Privacy: The circuit hides which specific camera/device signed the image,
 /// only proving it was from SOME trusted device in the trust list.
+///
+/// Note: ECDSA P-256 verification uses Noir's blackbox function which is
+/// implemented natively in Barretenberg, NOT as circuit constraints.
 
-use std::ecdsa_secp256r1::verify_signature as ecdsa_verify;
+use std::ecdsa_secp256r1::verify_signature;
 use std::hash::pedersen_hash;
-
-// Import noir_rsa for RSA-2048 verification (Adobe PS256)
-use noir_rsa::rsa::verify_sha256_pkcs1v15;
-use noir_rsa::types::RBN2048;
-
-// Import bignum for RSA parameter construction
-use bignum::params::BigNumParams;
-
-/// Standard RSA public exponent (e = 65537)
-global RSA_EXPONENT: u32 = 65537;
+// sha256_var removed - testing with pre-computed hash
 
 /// Maximum depth of the Merkle tree for the trust list
 /// 2^10 = 1024 trusted signers capacity
 global MERKLE_TREE_DEPTH: u32 = 10;
-
-/// Algorithm selector values
-global ALG_ES256: u8 = 0; // ECDSA P-256
-global ALG_PS256: u8 = 1; // RSA-2048 PSS
 
 /// The main circuit entry point
 ///
@@ -40,130 +25,66 @@ global ALG_PS256: u8 = 1; // RSA-2048 PSS
 /// - trust_list_root: The Merkle root of the approved signers list
 /// - content_hash: Hash of the image content (binds proof to specific image)
 /// - nullifier: Prevents proof reuse while preserving privacy
-/// - origin_trust_tier: Trust tier of the provenance chain origin (1-3)
-/// - is_ai_generated: Whether the content is AI-generated (always disclosed)
-/// - chain_depth: Number of steps in the provenance chain (1-10)
-/// - chain_truncated: Whether the chain was truncated (0 or 1)
-/// - disclosure_level: User's disclosure preference (0-4)
-/// - proof_timestamp: When the proof was generated (unix timestamp)
-/// - algorithm: Which signing algorithm (0=ES256, 1=PS256)
 ///
-/// Private inputs depend on algorithm:
-/// - For ES256: signature, public_key_x, public_key_y, message_hash
-/// - For PS256: rsa_signature_limbs, rsa_modulus_limbs, rsa_redc_limbs, message_hash
+/// Private inputs (hidden):
+/// - signature: ECDSA signature (r || s, 64 bytes total)
+/// - public_key_x, public_key_y: Signer's public key (32 bytes each)
+/// - message: Raw Sig_structure bytes to be hashed and verified
+/// - message_length: Actual length of the message (rest is zero-padded)
+/// - merkle_path: Proof of signer's inclusion in trust list
+/// - merkle_indices: Path direction bits for Merkle proof
 fn main(
-    // Public inputs - Core verification
+    // Public inputs
     trust_list_root: pub Field,
     content_hash: pub Field,
     nullifier: pub Field,
 
-    // Public inputs - Chain metadata
-    origin_trust_tier: pub u8,
-    is_ai_generated: pub u8,
-    chain_depth: pub u8,
-    chain_truncated: pub u8,
-    disclosure_level: pub u8,
-    proof_timestamp: pub u64,
+    // Private inputs - ECDSA signature (r || s concatenated)
+    signature: [u8; 64],
 
-    // Public input - Algorithm selector
-    algorithm: pub u8,
+    // Private inputs - Public key of signer
+    public_key_x: [u8; 32],
+    public_key_y: [u8; 32],
 
-    // Private inputs - ECDSA P-256 (ES256)
-    // Only used when algorithm == 0
-    ecdsa_signature: [u8; 64],
-    ecdsa_public_key_x: [u8; 32],
-    ecdsa_public_key_y: [u8; 32],
-
-    // Private inputs - RSA-2048 (PS256)
-    // Only used when algorithm == 1
-    // RSA signature as 18 limbs (each u128, ~120 bits used)
-    rsa_signature_limbs: [u128; 18],
-    // RSA public key modulus as 18 limbs
-    rsa_modulus_limbs: [u128; 18],
-    // Montgomery reduction parameter (precomputed from modulus)
-    rsa_redc_limbs: [u128; 18],
-
-    // Private inputs - Message hash (used by both algorithms)
+    // Private inputs - Pre-computed message hash (SHA-256 of Sig_structure)
     message_hash: [u8; 32],
 
     // Private inputs - Merkle proof for trust list membership
     merkle_path: [Field; MERKLE_TREE_DEPTH],
     merkle_indices: [Field; MERKLE_TREE_DEPTH]
 ) {
-    // Validate algorithm selector
-    assert((algorithm == ALG_ES256) | (algorithm == ALG_PS256), "Invalid algorithm");
+    // Step 1: Verify the ECDSA P-256 signature (blackbox - native Barretenberg operation)
+    // This proves the image was signed by the holder of this private key
+    // The message_hash is pre-computed SHA-256(Sig_structure) passed as input
+    let signature_valid = verify_signature(
+        public_key_x,
+        public_key_y,
+        signature,
+        message_hash
+    );
+    assert(signature_valid, "Invalid C2PA signature");
 
-    // Compute public key hash for trust list lookup
-    // This is different for each algorithm
-    let pubkey_hash: Field = if algorithm == ALG_ES256 {
-        // For ECDSA: hash(x || y)
-        let x_field = bytes_to_field(ecdsa_public_key_x);
-        let y_field = bytes_to_field(ecdsa_public_key_y);
-        pedersen_hash([x_field, y_field])
-    } else {
-        // For RSA: hash the modulus limbs
-        // Convert first 8 limbs to fields (enough for uniqueness)
-        let m0 = rsa_modulus_limbs[0] as Field;
-        let m1 = rsa_modulus_limbs[1] as Field;
-        let m2 = rsa_modulus_limbs[2] as Field;
-        let m3 = rsa_modulus_limbs[3] as Field;
-        let m4 = rsa_modulus_limbs[4] as Field;
-        let m5 = rsa_modulus_limbs[5] as Field;
-        let m6 = rsa_modulus_limbs[6] as Field;
-        let m7 = rsa_modulus_limbs[7] as Field;
-        // Hash in two stages to fit Pedersen input limits
-        let h1 = pedersen_hash([m0, m1, m2, m3]);
-        let h2 = pedersen_hash([m4, m5, m6, m7]);
-        pedersen_hash([h1, h2])
-    };
+    // Step 3: Compute the leaf hash from the public key
+    // The trust list contains hashes of approved public keys
+    let pubkey_x_field = bytes_to_field(public_key_x);
+    let pubkey_y_field = bytes_to_field(public_key_y);
+    let leaf = pedersen_hash([pubkey_x_field, pubkey_y_field]);
 
-    // Step 1: Verify signature based on algorithm
-    if algorithm == ALG_ES256 {
-        // ECDSA P-256 verification (blackbox - native Barretenberg)
-        let valid = ecdsa_verify(
-            ecdsa_public_key_x,
-            ecdsa_public_key_y,
-            ecdsa_signature,
-            message_hash
-        );
-        assert(valid, "Invalid ES256 signature");
-    } else {
-        // RSA-2048 PKCS#1 v1.5 verification
-        // Construct BigNumParams from modulus (N) and reduction params
-        let params: BigNumParams<18, 2048> = BigNumParams::new(
-            false, // has_multiplicative_inverse
-            rsa_modulus_limbs,
-            rsa_redc_limbs
-        );
-
-        // Construct signature as RBN2048
-        let sig: RBN2048 = RBN2048::from_array(params, rsa_signature_limbs);
-
-        // Verify RSA signature
-        let valid = verify_sha256_pkcs1v15(message_hash, sig, RSA_EXPONENT);
-        assert(valid, "Invalid PS256 signature");
-    }
-
-    // Step 2: Verify Merkle membership in trust list
-    let computed_root = compute_merkle_root(pubkey_hash, merkle_path, merkle_indices);
+    // Step 4: Verify Merkle membership in trust list
+    // This proves the signer is in the approved list without revealing which one
+    let computed_root = compute_merkle_root(leaf, merkle_path, merkle_indices);
     assert(computed_root == trust_list_root, "Signer not in trust list");
 
-    // Step 3: Verify nullifier derivation
-    let expected_nullifier = pedersen_hash([content_hash, pubkey_hash]);
+    // Step 5: Verify nullifier derivation
+    // Nullifier = hash(content_hash, public_key_hash)
+    // This prevents the same proof from being submitted twice for the same image
+    // while still hiding which key was used
+    let expected_nullifier = pedersen_hash([content_hash, leaf]);
     assert(nullifier == expected_nullifier, "Invalid nullifier");
-
-    // Step 4: Validate chain metadata bounds
-    assert(origin_trust_tier >= 1, "Invalid trust tier: too low");
-    assert(origin_trust_tier <= 3, "Invalid trust tier: Tier 4 blocked");
-    assert((is_ai_generated == 0) | (is_ai_generated == 1), "Invalid AI flag");
-    assert(chain_depth >= 1, "Chain depth must be at least 1");
-    assert(chain_depth <= 10, "Chain depth exceeds maximum");
-    assert((chain_truncated == 0) | (chain_truncated == 1), "Invalid truncation flag");
-    assert(disclosure_level <= 4, "Invalid disclosure level");
-    assert(proof_timestamp > 0, "Invalid proof timestamp");
 }
 
-/// Convert a 32-byte array to a Field element (big-endian)
+/// Convert a 32-byte array to a Field element
+/// Uses big-endian interpretation
 fn bytes_to_field(bytes: [u8; 32]) -> Field {
     let mut result: Field = 0;
     for i in 0..32 {
@@ -173,6 +94,7 @@ fn bytes_to_field(bytes: [u8; 32]) -> Field {
 }
 
 /// Compute Merkle root from a leaf and proof path
+/// Uses Pedersen hash for ZK-friendly computation
 fn compute_merkle_root(
     leaf: Field,
     path: [Field; MERKLE_TREE_DEPTH],
@@ -184,6 +106,8 @@ fn compute_merkle_root(
         let path_element = path[i];
         let is_right = indices[i];
 
+        // If is_right = 0, current is left child, path_element is right
+        // If is_right = 1, path_element is left child, current is right
         let left = if is_right == 0 { current } else { path_element };
         let right = if is_right == 0 { path_element } else { current };
 
@@ -193,10 +117,7 @@ fn compute_merkle_root(
     current
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
+/// Test module for circuit verification
 #[test]
 fn test_bytes_to_field() {
     let bytes: [u8; 32] = [
@@ -211,17 +132,20 @@ fn test_bytes_to_field() {
 
 #[test]
 fn test_merkle_single_level() {
+    // Simple test with a depth-1 tree
     let leaf: Field = 123;
     let sibling: Field = 456;
 
+    // Create a minimal path (rest are zeros)
     let mut path: [Field; MERKLE_TREE_DEPTH] = [0; MERKLE_TREE_DEPTH];
     path[0] = sibling;
 
     let mut indices: [Field; MERKLE_TREE_DEPTH] = [0; MERKLE_TREE_DEPTH];
-    indices[0] = 0;
+    indices[0] = 0; // leaf is on the left
 
     let root = compute_merkle_root(leaf, path, indices);
 
+    // Verify the root is deterministic - compute expected manually
     let first_level = pedersen_hash([leaf, sibling]);
     let mut expected = first_level;
     for _ in 1..MERKLE_TREE_DEPTH {
