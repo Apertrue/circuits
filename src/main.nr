@@ -16,7 +16,7 @@
 ///
 /// Architecture: "Intermediate Promotion"
 /// - Instead of enumerating millions of device leaf keys, we promote ~50-100 intermediate CAs
-/// - The Oracle verifies intermediate → root chains and publishes a Merkle tree
+/// - The Oracle verifies intermediate -> root chains and publishes a Merkle tree
 /// - Client proves leaf was signed by a promoted intermediate
 
 use std::ecdsa_secp256r1::verify_signature;
@@ -78,9 +78,9 @@ fn main(
     merkle_path: [Field; MERKLE_TREE_DEPTH],
     merkle_indices: [Field; MERKLE_TREE_DEPTH]
 ) {
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // STEP 1: Verify COSE signature (leaf key signed the C2PA claim)
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // This proves the content was signed by the holder of this leaf key
     let cose_valid = verify_signature(
         leaf_pubkey_x,
@@ -90,16 +90,16 @@ fn main(
     );
     assert(cose_valid, "Invalid COSE signature");
 
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // STEP 2: Hash the TBS certificate (for cert signature verification)
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // We need to verify the intermediate's signature over the leaf's TBS
     // The signature covers SHA256(tbsCertificate DER bytes)
     let tbs_hash: [u8; 32] = sha256_var(tbs_certificate, tbs_len as u64);
 
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // STEP 3: Verify certificate signature (intermediate signed leaf)
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // This proves the leaf certificate was issued by this intermediate CA
     let cert_valid = verify_signature(
         intermediate_pubkey_x,
@@ -109,9 +109,9 @@ fn main(
     );
     assert(cert_valid, "Invalid certificate signature");
 
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // STEP 4: Validate SPKI extraction and bind leaf pubkey
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // This prevents type confusion attacks where attacker provides
     // arbitrary bytes that "look like" a pubkey but aren't actually
     // in the certificate's SubjectPublicKeyInfo
@@ -155,25 +155,25 @@ fn main(
         );
     }
 
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // STEP 5: Compute intermediate SPKI hash for Merkle lookup
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // The trust list contains Pedersen hashes of intermediate public keys
     let intermediate_x_field = bytes_to_field(intermediate_pubkey_x);
     let intermediate_y_field = bytes_to_field(intermediate_pubkey_y);
     let intermediate_leaf = pedersen_hash([intermediate_x_field, intermediate_y_field]);
 
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // STEP 6: Verify intermediate is in Oracle's trust list
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // This proves the intermediate CA is a promoted/authorized CA
     // without revealing which specific intermediate it is
     let computed_root = compute_merkle_root(intermediate_leaf, merkle_path, merkle_indices);
     assert(computed_root == trust_list_root, "Intermediate not in trust list");
 
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // STEP 7: Verify nullifier derivation (replay prevention)
-    // ════════════════════════════════════════════════════════════════
+    // ================================================================
     // Nullifier = H(content_hash, leaf_pubkey_hash)
     // This prevents the same proof from being reused for different uploads
     // while allowing viral resharing of verified content
@@ -219,9 +219,9 @@ fn compute_merkle_root(
     current
 }
 
-// ════════════════════════════════════════════════════════════════════
+// ====================================================================
 // TESTS
-// ════════════════════════════════════════════════════════════════════
+// ====================================================================
 
 #[test]
 fn test_bytes_to_field() {
