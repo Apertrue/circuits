@@ -29,12 +29,14 @@
 
 use std::ecdsa_secp256r1::verify_signature;
 use std::hash::pedersen_hash;
-use std::hash::sha256_var;
 
-// RSA verification from noir_rsa
+// RSA verification from noir_rsa (zkpassport fork)
 use noir_rsa::rsa::verify_sha256_pkcs1v15;
 use noir_rsa::types::{RBN2048, RBN4096};
 use bignum::params::BigNumParams;
+
+// SHA256 for variable length
+use sha256::sha256_var;
 
 /// Maximum TBS certificate size (in bytes)
 global MAX_TBS_SIZE: u32 = 2048;
