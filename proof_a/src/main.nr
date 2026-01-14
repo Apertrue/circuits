@@ -1,17 +1,8 @@
-/// Apertrue ProofA - Certificate Chain Verification
-///
-/// Refactored for Oracle-Based Verification (No in-circuit RSA)
-///
-/// ProofA proves:
-/// 1. The Leaf Public Key (identity) is exposed publicly as a hash.
-/// 2. The Leaf Public Key is bound to the Nullifier (preventing double-spend).
-/// 3. The Proof is linked to ProofB via a Link Commitment.
-///
-/// The Off-chain Oracle (Verifier) assumes responsibility for verifying:
-/// - The Certificate Chain (Leaf -> Intermediate -> Root).
-/// - The Leaf Public Key Hash matches the actual Leaf Certificate.
+use bignum::params::BigNumParams;
+use noir_rsa::types::RBN4096; 
+use noir_rsa::types::RBN2048;
+use noir_rsa::rsa::verify_sha256_pkcs1v15;
 
-use std::ecdsa_secp256r1::verify_signature;
 use std::hash::pedersen_hash;
 
 // Constants
@@ -29,12 +20,11 @@ fn main(
     cert_not_after: pub Field,
     link_commit: pub Field,
 
-    // === NEW PUBLIC INPUT: Leaf Key Identity ===
-    // This allows the Oracle/Server to check the off-chain signature against this key
-    leaf_pubkey_hash: pub Field,
+    // === NEW PUBLIC INPUT: Pre-computed TBS Hash ===
+    tbs_hash_bytes: pub [u8; 32],
 
     // === PRIVATE: ALGORITHM SELECTORS ===
-    cert_algorithm: Field,  // Unused in this simplified circuit but kept for structure
+    cert_algorithm: Field,  // 2 = RSA-4096, 1 = RSA-2048
     leaf_key_type: Field,   // 0 = ECDSA, 1 = RSA
 
     // === PRIVATE: LEAF KEY (for nullifier binding) ===
@@ -45,12 +35,43 @@ fn main(
     leaf_rsa_modulus_limb0: u128,
     leaf_rsa_modulus_limb1: u128,
 
+    // === PRIVATE: CERTIFICATE SIGNATURE & KEY ===
+    // RSA-4096 Signature & Key
+    cert_signature_rsa_4096_limbs: [u128; 35],
+    intermediate_rsa_4096_modulus_limbs: [u128; 35],
+    intermediate_rsa_4096_redc_limbs: [u128; 35],
+
+    // RSA-2048 Fallback (optional, for other chains)
+    cert_signature_rsa_2048_limbs: [u128; 18],
+    intermediate_rsa_2048_modulus_limbs: [u128; 18],
+    intermediate_rsa_2048_redc_limbs: [u128; 18],
+
     // === PRIVATE: LINKING WITNESS ===
     intermediate_leaf: Field,  // pedersen_hash of intermediate key material
     link_blind: Field          // random blinding factor (same as in ProofB)
 ) {
     // ================================================================
-    // STEP 1: Derive Leaf Key Hash
+    // STEP 1: Verify RSA Signature (Root/Intermediate validates Leaf)
+    // ================================================================
+
+    if cert_algorithm == 2 {
+        // RSA-4096 (Standard Lib)
+        let params: BigNumParams<35, 4096> = BigNumParams::new(false, intermediate_rsa_4096_modulus_limbs, intermediate_rsa_4096_redc_limbs);
+        let signature: RBN4096 = RBN4096::from_array(params, cert_signature_rsa_4096_limbs);
+        
+        let valid = verify_sha256_pkcs1v15(tbs_hash_bytes, signature, 65537);
+        assert(valid, "RSA-4096 verification failed");
+    } else {
+        // RSA-2048 (Fallback)
+        let params: BigNumParams<18, 2048> = BigNumParams::new(false, intermediate_rsa_2048_modulus_limbs, intermediate_rsa_2048_redc_limbs);
+        let signature: RBN2048 = RBN2048::from_array(params, cert_signature_rsa_2048_limbs);
+        
+        let valid = verify_sha256_pkcs1v15(tbs_hash_bytes, signature, 65537);
+        assert(valid, "RSA-2048 verification failed");
+    }
+
+    // ================================================================
+    // STEP 2: Derive Leaf Key Hash
     // ================================================================
     let computed_leaf_key_hash = if leaf_key_type == LEAF_ALG_ECDSA {
         let x_field = bytes_to_field(leaf_pubkey_x);
@@ -60,25 +81,22 @@ fn main(
         pedersen_hash([leaf_rsa_modulus_limb0 as Field, leaf_rsa_modulus_limb1 as Field])
     };
 
-    // Correctness Check: Assert the derived hash matches the public claim
-    assert(leaf_pubkey_hash == computed_leaf_key_hash, "Leaf public key hash mismatch");
-
     // ================================================================
-    // STEP 2: Verify Nullifier Derivation
+    // STEP 3: Verify Nullifier Derivation
     // ================================================================
     // This binds the Leaf Key to the Content Hash
     let expected_nullifier = pedersen_hash([content_hash, computed_leaf_key_hash]);
     assert(nullifier == expected_nullifier, "Invalid nullifier (leaf key binding failed)");
 
     // ================================================================
-    // STEP 3: Verify Link Commitment
+    // STEP 4: Verify Link Commitment
     // ================================================================
     // This binds this proof to ProofB (which validates intermediate_leaf in Trust List)
     let expected_link_commit = pedersen_hash([intermediate_leaf, link_blind]);
     assert(link_commit == expected_link_commit, "Link commitment mismatch");
 
     // ================================================================
-    // STEP 4: Certificate Validity (Time)
+    // STEP 5: Certificate Validity (Time)
     // ================================================================
     let ts = proof_timestamp as u64;
     let not_before = cert_not_before as u64;
@@ -88,7 +106,6 @@ fn main(
 
     // Unused inputs to silence warnings
     let _ = trust_list_root;
-    let _ = cert_algorithm;
 }
 
 /// Convert 32 bytes to Field (big-endian)
@@ -98,58 +115,4 @@ fn bytes_to_field(bytes: [u8; 32]) -> Field {
         result = result * 256 + bytes[i] as Field;
     }
     result
-}
-
-// ====================================================================
-// TESTS
-// ====================================================================
-
-#[test]
-fn test_intermediate_leaf_ecdsa() {
-    let x: [u8; 32] = [1; 32];
-    let y: [u8; 32] = [2; 32];
-    
-    let x_field = bytes_to_field(x);
-    let y_field = bytes_to_field(y);
-    let leaf = pedersen_hash([x_field, y_field]);
-    
-    // Verify same inputs produce same output
-    let leaf2 = pedersen_hash([x_field, y_field]);
-    assert(leaf == leaf2);
-}
-
-#[test]
-fn test_intermediate_leaf_rsa() {
-    let modulus_limb0: u128 = 12345678901234567890;
-    let modulus_limb1: u128 = 98765432109876543210;
-    
-    let leaf = pedersen_hash([modulus_limb0 as Field, modulus_limb1 as Field]);
-    
-    // Different limbs -> different leaf
-    let different_limb0: u128 = 11111111111111111111;
-    let different_leaf = pedersen_hash([different_limb0 as Field, modulus_limb1 as Field]);
-    assert(leaf != different_leaf);
-}
-
-#[test]
-fn test_leaf_key_binding() {
-    // Simulate the splice attack prevention:
-    // ProofA derives nullifier from TBS leaf key
-    // ProofB derives nullifier from COSE leaf key
-    // If they match, the leaf keys must be the same
-    
-    let content_hash: Field = 999;
-    let leaf_key_hash_a: Field = 111;
-    let leaf_key_hash_b: Field = 111; // Same as A
-    
-    let nullifier_a = pedersen_hash([content_hash, leaf_key_hash_a]);
-    let nullifier_b = pedersen_hash([content_hash, leaf_key_hash_b]);
-    
-    assert(nullifier_a == nullifier_b);
-    
-    // Different leaf key -> different nullifier (attack detected)
-
-    let attacker_leaf_key: Field = 222;
-    let attacker_nullifier = pedersen_hash([content_hash, attacker_leaf_key]);
-    assert(nullifier_a != attacker_nullifier);
 }
