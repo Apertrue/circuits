@@ -28,6 +28,8 @@ use std::ecdsa_secp256r1::verify_signature;
 use std::hash::pedersen_hash;
 
 // RSA verification from noir_rsa
+// NOTE: PS256 (Adobe/ChatGPT) uses RSASSA-PSS, but noir_rsa v0.7.0 only has PKCS#1 v1.5
+// TODO: Add PSS support when available in noir_rsa
 use noir_rsa::rsa::verify_sha256_pkcs1v15;
 use noir_rsa::types::RBN2048;
 use bignum::params::BigNumParams;
@@ -93,7 +95,9 @@ fn main(
         );
         assert(cose_valid, "Invalid ECDSA COSE signature");
     } else {
-        // PS256: RSA-2048 PKCS#1 v1.5 signature
+        // PS256: RSA-2048 signature
+        // WARNING: PS256 uses RSASSA-PSS but noir_rsa v0.7.0 only supports PKCS#1 v1.5
+        // This will fail for Adobe/ChatGPT images until PSS support is added
         let params: BigNumParams<18, 2048> = BigNumParams::new(
             false,
             leaf_rsa_modulus_limbs,
