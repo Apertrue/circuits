@@ -3,7 +3,10 @@ use noir_rsa::types::RBN4096;
 use noir_rsa::types::RBN2048;
 use noir_rsa::rsa::verify_sha256_pkcs1v15;
 
+use std::ecdsa_secp256r1::verify_signature;
 use std::hash::pedersen_hash;
+
+mod crypto_utils;
 
 // Constants
 global LEAF_ALG_ECDSA: Field = 0;
@@ -22,9 +25,10 @@ fn main(
 
     // === NEW PUBLIC INPUT: Pre-computed TBS Hash ===
     tbs_hash_bytes: pub [u8; 32],
+    tbs_hash_sha384: pub [u8; 48],
 
     // === PRIVATE: ALGORITHM SELECTORS ===
-    cert_algorithm: Field,  // 2 = RSA-4096, 1 = RSA-2048
+    cert_algorithm: Field,  // 2 = RSA-4096, 1 = RSA-2048, 3 = RSA-2048-SHA384
     leaf_key_type: Field,   // 0 = ECDSA, 1 = RSA
 
     // === PRIVATE: LEAF KEY (for nullifier binding) ===
@@ -46,6 +50,12 @@ fn main(
     intermediate_rsa_2048_modulus_limbs: [u128; 18],
     intermediate_rsa_2048_redc_limbs: [u128; 18],
 
+    // === PRIVATE: ECDSA CERTIFICATE SIGNATURE & KEY ===
+    // ECDSA P-256 Signature (64 bytes: 32 bytes R + 32 bytes S)
+    cert_signature_ecdsa: [u8; 64],
+    intermediate_ecdsa_pubkey_x: [u8; 32],
+    intermediate_ecdsa_pubkey_y: [u8; 32],
+
     // === PRIVATE: LINKING WITNESS ===
     intermediate_leaf: Field,  // pedersen_hash of intermediate key material
     link_blind: Field          // random blinding factor (same as in ProofB)
@@ -61,13 +71,31 @@ fn main(
         
         let valid = verify_sha256_pkcs1v15(tbs_hash_bytes, signature, 65537);
         assert(valid, "RSA-4096 verification failed");
-    } else {
+    } else if cert_algorithm == 1 {
         // RSA-2048 (Fallback)
         let params: BigNumParams<18, 2048> = BigNumParams::new(false, intermediate_rsa_2048_modulus_limbs, intermediate_rsa_2048_redc_limbs);
         let signature: RBN2048 = RBN2048::from_array(params, cert_signature_rsa_2048_limbs);
         
         let valid = verify_sha256_pkcs1v15(tbs_hash_bytes, signature, 65537);
         assert(valid, "RSA-2048 verification failed");
+    } else if cert_algorithm == 3 {
+        // RSA-2048 with SHA-384
+        let params: BigNumParams<18, 2048> = BigNumParams::new(false, intermediate_rsa_2048_modulus_limbs, intermediate_rsa_2048_redc_limbs);
+        let signature: RBN2048 = RBN2048::from_array(params, cert_signature_rsa_2048_limbs);
+        
+        let valid = crypto_utils::verify_sha384_pkcs1v15_2048(tbs_hash_sha384, signature, 65537);
+        assert(valid, "RSA-2048-SHA384 verification failed");
+    } else if cert_algorithm == 0 {
+        // ECDSA P-256 (Native)
+        let valid = verify_signature(
+            intermediate_ecdsa_pubkey_x,
+            intermediate_ecdsa_pubkey_y,
+            cert_signature_ecdsa, // signature
+            tbs_hash_bytes        // message hash
+        );
+        assert(valid, "ECDSA verification failed");
+    } else {
+        assert(false, "Invalid certificate algorithm");
     }
 
     // ================================================================
