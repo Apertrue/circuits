@@ -1,6 +1,6 @@
-use bignum::BigNum;
+use dep::bignum::BigNum;
 
-use crate::scalar_field::ScalarField;
+use crate::crypto::noir_bigcurve_vendor::scalar_field::ScalarField;
 use super::BigCurve;
 
 /// CurveJ represents a Short Weierstrass elliptic curve using Jacobian coordinates.
@@ -105,7 +105,7 @@ where
         }
 
         // tadaa
-        let inverses: [B; NumEntries] = bignum::bignum::batch_invert(inverses);
+        let inverses: [B; NumEntries] = dep::bignum::bignum::batch_invert(inverses);
 
         for i in 0..j_tx.len() {
             let z_inv = inverses[i];
@@ -146,6 +146,7 @@ where
             x: [B::zero(); 16],
             y: [B::zero(); 16],
             z: [B::zero(); 16],
+            // Safety: efficient transcript init
             transcript: [unsafe { JTranscript::new() }; 8],
         }
     }
@@ -232,6 +233,7 @@ where
         // if x == y then (X1 / Z1 * Z1 = X2 / Z2 * Z2)
         //            and (Y1 / Z1 * Z1 * Z1 = Y2 / Z2 * Z2 * Z2)
         let mut points_equal = false;
+        // Safety: efficient comparison
         unsafe {
             // we can check this by validating that:
             // X1 * Z2 * Z2 == X2 * Z1 * Z1
@@ -391,7 +393,7 @@ where
         let S2 = Y2.__mul(Z1Z1Z1);
         let R = S2.__sub(S1);
 
-        let (_, PP): (B, B) = bignum::bignum::compute_quadratic_expression(
+        let (_, PP): (B, B) = dep::bignum::bignum::compute_quadratic_expression(
             [[U2, U1]],
             [[false, true]],
             [[U2, U1]],
@@ -399,7 +401,7 @@ where
             [],
             [],
         );
-        let (_, X3): (B, B) = bignum::bignum::compute_quadratic_expression(
+        let (_, X3): (B, B) = dep::bignum::bignum::compute_quadratic_expression(
             [[B::zero(), PP], [R, B::zero()]],
             [[false, true], [false, false]],
             [[U1, U2], [R, B::zero()]],
@@ -408,7 +410,7 @@ where
             [],
         );
 
-        let (_, U1S2_minus_U2S1): (B, B) = bignum::bignum::compute_quadratic_expression(
+        let (_, U1S2_minus_U2S1): (B, B) = dep::bignum::bignum::compute_quadratic_expression(
             [[U1], [U2]],
             [[false], [true]],
             [[S2], [S1]],
@@ -416,7 +418,7 @@ where
             [],
             [],
         );
-        let (_, Y3): (B, B) = bignum::bignum::compute_quadratic_expression(
+        let (_, Y3): (B, B) = dep::bignum::bignum::compute_quadratic_expression(
             [[PP], [X3]],
             [[false], [false]],
             [[U1S2_minus_U2S1], [R]],
@@ -425,7 +427,7 @@ where
             [],
         );
         let Z1Z2 = Z1.__mul(Z2);
-        let (_, Z3): (B, B) = bignum::bignum::compute_quadratic_expression(
+        let (_, Z3): (B, B) = dep::bignum::bignum::compute_quadratic_expression(
             [[Z1Z2, B::zero()]],
             [[false, false]],
             [[U2, U1]],
@@ -457,7 +459,7 @@ where
         let X1 = self.x;
         let Y1 = self.y;
         let Z1 = self.z;
-        let (_, YY_mul_2): (B, B) = bignum::bignum::compute_quadratic_expression(
+        let (_, YY_mul_2): (B, B) = dep::bignum::bignum::compute_quadratic_expression(
             [[Y1]],
             [[false]],
             [[Y1, Y1]],
@@ -465,7 +467,7 @@ where
             [],
             [],
         );
-        let mut (_, XX_mul_3): (B, B) = bignum::bignum::compute_quadratic_expression(
+        let mut (_, XX_mul_3): (B, B) = dep::bignum::bignum::compute_quadratic_expression(
             [[X1]],
             [[false]],
             [[X1, X1, X1]],
@@ -479,7 +481,7 @@ where
             let AZZZZ = ZZ.__mul(ZZ).__mul(Curve::a());
             XX_mul_3 = XX_mul_3.__add(AZZZZ);
         }
-        let (_, D): (B, B) = bignum::bignum::compute_quadratic_expression(
+        let (_, D): (B, B) = dep::bignum::bignum::compute_quadratic_expression(
             [[X1, X1]],
             [[false, false]],
             [[YY_mul_2]],
@@ -487,7 +489,7 @@ where
             [],
             [],
         );
-        let mut (_, X3): (B, B) = bignum::bignum::compute_quadratic_expression(
+        let mut (_, X3): (B, B) = dep::bignum::bignum::compute_quadratic_expression(
             [[XX_mul_3]],
             [[false]],
             [[XX_mul_3]],
@@ -495,7 +497,7 @@ where
             [D, D],
             [true, true],
         );
-        let (_, Y3): (B, B) = bignum::bignum::compute_quadratic_expression(
+        let (_, Y3): (B, B) = dep::bignum::bignum::compute_quadratic_expression(
             [[XX_mul_3], [YY_mul_2]],
             [[false], [true]],
             [[D, X3], [YY_mul_2, YY_mul_2]],
@@ -504,7 +506,7 @@ where
             [],
         );
         // 3XX * (D - X3) - 8YYYY
-        let (_, Z3): (B, B) = bignum::bignum::compute_quadratic_expression(
+        let (_, Z3): (B, B) = dep::bignum::bignum::compute_quadratic_expression(
             [[Y1]],
             [[false]],
             [[Z1, Z1]],
@@ -604,7 +606,7 @@ where
         let mut _scalars: [ScalarField<NScalarSlices>; Size] = [ScalarField::zero(); Size];
         for i in 0..Size {
             let (input, scalar) = if points[i].is_infinity {
-                (CurveJ::one(), crate::scalar_field::ScalarField::zero())
+                (CurveJ::one(), ScalarField::zero())
             } else {
                 (points[i], scalars[i])
             };

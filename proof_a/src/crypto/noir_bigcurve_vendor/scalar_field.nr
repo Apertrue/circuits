@@ -1,4 +1,4 @@
-use bignum::BigNum;
+use dep::bignum::BigNum;
 
 /// Represents a scalar multiplier as a sequence of 4-bit slices.
 ///
@@ -139,6 +139,7 @@ impl<let N: u32> std::convert::From<Field> for ScalarField<N> {
 
     /// Constructs an instance from a field element.
     fn from(input: Field) -> Self {
+        // Safety: efficient wnaf slicing
         let result = unsafe { get_wnaf_slices(input) };
 
         if !std::runtime::is_unconstrained() {
@@ -328,8 +329,8 @@ fn handle_overflow<B: BigNum>(acc: Field, result: &mut B, limb_index: u32) -> u1
 }
 
 mod tests {
-    use crate::scalar_field::get_modulus_slices;
-    use crate::scalar_field::ScalarField;
+    use crate::crypto::noir_bigcurve_vendor::scalar_field::get_modulus_slices;
+    use crate::crypto::noir_bigcurve_vendor::scalar_field::ScalarField;
     #[test]
     // test even number of nibbles
     unconstrained fn fuzz_test_scalar_field_conversion(f: Field) {

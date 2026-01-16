@@ -7,10 +7,11 @@ use std::ecdsa_secp256r1::verify_signature;
 use std::hash::pedersen_hash;
 
 mod crypto_utils;
+mod crypto;
 
 // Constants
 global LEAF_ALG_ECDSA: Field = 0;
-global LEAF_ALG_RSA: Field = 1;
+
 
 /// ProofA main entry point
 fn main(
@@ -28,7 +29,7 @@ fn main(
     tbs_hash_sha384: pub [u8; 48],
 
     // === PRIVATE: ALGORITHM SELECTORS ===
-    cert_algorithm: Field,  // 2 = RSA-4096, 1 = RSA-2048, 3 = RSA-2048-SHA384
+    cert_algorithm: Field,  // 0 = ECDSA-P256, 1 = RSA-2048, 2 = RSA-4096, 3 = RSA-2048-SHA384, 4 = ECDSA-P384
     leaf_key_type: Field,   // 0 = ECDSA, 1 = RSA
 
     // === PRIVATE: LEAF KEY (for nullifier binding) ===
@@ -56,11 +57,19 @@ fn main(
     intermediate_ecdsa_pubkey_x: [u8; 32],
     intermediate_ecdsa_pubkey_y: [u8; 32],
 
+    // === PRIVATE: ECDSA P-384 CERTIFICATE SIGNATURE & KEY ===
+    // ECDSA P-384 Signature (96 bytes: 48 bytes R + 48 bytes S)
+    cert_signature_ecdsa_p384_r: [u8; 48],
+    cert_signature_ecdsa_p384_s: [u8; 48],
+    intermediate_ecdsa_p384_pubkey_x: [u8; 48],
+    intermediate_ecdsa_p384_pubkey_y: [u8; 48],
+
     // === PRIVATE: LINKING WITNESS ===
     intermediate_leaf: Field,  // pedersen_hash of intermediate key material
     link_blind: Field          // random blinding factor (same as in ProofB)
 ) {
     // ================================================================
+    println(f"Cert Algorithm: {cert_algorithm}");
     // STEP 1: Verify RSA Signature (Root/Intermediate validates Leaf)
     // ================================================================
 
@@ -93,9 +102,19 @@ fn main(
             cert_signature_ecdsa, // signature
             tbs_hash_bytes        // message hash
         );
-        assert(valid, "ECDSA verification failed");
+        assert(valid, "ECDSA P-256 verification failed");
+    } else if cert_algorithm == 4 {
+        // ECDSA P-384 (Google Pixel)
+        let valid = crypto_utils::verify_ecdsa_p384(
+            tbs_hash_sha384,
+            intermediate_ecdsa_p384_pubkey_x,
+            intermediate_ecdsa_p384_pubkey_y,
+            cert_signature_ecdsa_p384_r,
+            cert_signature_ecdsa_p384_s
+        );
+        assert(valid, "ECDSA P-384 verification failed");
     } else {
-        assert(false, "Invalid certificate algorithm");
+        assert(false, f"Invalid certificate algorithm: {cert_algorithm}");
     }
 
     // ================================================================
@@ -124,6 +143,33 @@ fn main(
     assert(link_commit == expected_link_commit, "Link commitment mismatch");
 
     // ================================================================
+    // STEP 4b: Verify Intermediate Leaf Formulation
+    // ================================================================
+    // CRITICAL: We must ensure 'intermediate_leaf' witness corresponds to the 
+    // intermediate public key verified in Step 1.
+    
+    let computed_intermediate_hash = if cert_algorithm == 2 {
+        // RSA-4096 (hash first 2 limbs)
+        pedersen_hash([intermediate_rsa_4096_modulus_limbs[0] as Field, intermediate_rsa_4096_modulus_limbs[1] as Field])
+    } else if (cert_algorithm == 1) | (cert_algorithm == 3) {
+        // RSA-2048 (hash first 2 limbs)
+        pedersen_hash([intermediate_rsa_2048_modulus_limbs[0] as Field, intermediate_rsa_2048_modulus_limbs[1] as Field])
+    } else if cert_algorithm == 4 {
+        // ECDSA P-384
+        // Convert 48-byte coordinates to Field (mod P)
+        let x_field = bytes48_to_field(intermediate_ecdsa_p384_pubkey_x);
+        let y_field = bytes48_to_field(intermediate_ecdsa_p384_pubkey_y);
+        pedersen_hash([x_field, y_field])
+    } else {
+        // ECDSA P-256 (Default)
+        let x_field = bytes_to_field(intermediate_ecdsa_pubkey_x);
+        let y_field = bytes_to_field(intermediate_ecdsa_pubkey_y);
+        pedersen_hash([x_field, y_field])
+    };
+
+    assert(intermediate_leaf == computed_intermediate_hash, "Intermediate Leaf witnessing mismatch (Self-Signing Attack prevention)");
+
+    // ================================================================
     // STEP 5: Certificate Validity (Time)
     // ================================================================
     let ts = proof_timestamp as u64;
@@ -140,6 +186,15 @@ fn main(
 fn bytes_to_field(bytes: [u8; 32]) -> Field {
     let mut result: Field = 0;
     for i in 0..32 {
+        result = result * 256 + bytes[i] as Field;
+    }
+    result
+}
+
+/// Convert 48 bytes to Field (big-endian)
+fn bytes48_to_field(bytes: [u8; 48]) -> Field {
+    let mut result: Field = 0;
+    for i in 0..48 {
         result = result * 256 + bytes[i] as Field;
     }
     result

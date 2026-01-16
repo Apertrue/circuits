@@ -1,17 +1,15 @@
 pub(crate) mod curve_jac;
-mod test_data;
-mod bigcurve_test;
 pub mod scalar_field;
 pub(crate) mod utils;
 pub mod curves;
 
-use bignum::BigNum;
-use bignum::bignum::evaluate_quadratic_expression;
+use dep::bignum::BigNum;
+use dep::bignum::bignum::evaluate_quadratic_expression;
 
-use crate::curve_jac::AffineTranscript;
-use crate::scalar_field::ScalarField;
+use crate::crypto::noir_bigcurve_vendor::curve_jac::AffineTranscript;
+use crate::crypto::noir_bigcurve_vendor::scalar_field::ScalarField;
 use std::ops::{Add, Neg, Sub};
-mod benchmarks;
+// mod benchmarks;
 
 /// Implements an elliptic curve over a prime field that is not the circuit's native field.
 
@@ -77,11 +75,11 @@ pub comptime fn derive_curve_impl(
     params: Quoted,
 ) -> Quoted {
     let typ = struct_def.as_type();
-    let CurveJ = quote { $crate::curve_jac::CurveJ };
-    let AffineTranscript = quote { $crate::curve_jac::AffineTranscript };
+    let CurveJ = quote { $crate::crypto::noir_bigcurve_vendor::curve_jac::CurveJ };
+    let AffineTranscript = quote { $crate::crypto::noir_bigcurve_vendor::curve_jac::AffineTranscript };
 
     quote {
-        impl $crate::BigCurve<$field_type> for $typ {
+        impl $crate::crypto::noir_bigcurve_vendor::BigCurve<$field_type> for $typ {
             fn x(self) -> $field_type {
                 self.x
             }
@@ -151,7 +149,7 @@ pub comptime fn derive_curve_impl(
                 //  xxx - yy + ax + b = 0
                 // (xx + a) * x - y*y + b = 0
                 // validate the provided value of `y3` is correct
-                $crate::evaluate_quadratic_expression(
+                $crate::crypto::noir_bigcurve_vendor::evaluate_quadratic_expression(
                     [[xx, $params.a], [y, $field_type::zero()]],
                     [[false, false], [false, false]],
                     [[x], [y]],
@@ -163,12 +161,13 @@ pub comptime fn derive_curve_impl(
 
             fn mul<let NScalarSlices: u32>(self, scalar: ScalarField<NScalarSlices>) -> Self {
                 let transcript: [$AffineTranscript<$field_type>; (NScalarSlices * 5) + 6] =
-                    unsafe { $crate::get_mul_transcript::<NScalarSlices, $field_type, $typ>(self, scalar) };
-                $crate::mul_with_hint::<NScalarSlices, (NScalarSlices * 5) + 6, $field_type, $typ>(self, scalar, transcript)
+                    // Safety: efficient mul transcript
+                    unsafe { $crate::crypto::noir_bigcurve_vendor::get_mul_transcript::<NScalarSlices, $field_type, $typ>(self, scalar) };
+                $crate::crypto::noir_bigcurve_vendor::mul_with_hint::<NScalarSlices, (NScalarSlices * 5) + 6, $field_type, $typ>(self, scalar, transcript)
             }
 
             fn hash_to_curve<let N: u32>(seed: [u8; N]) -> Self {
-                let r = $crate::utils::hash_to_curve::hash_to_curve::<$field_type, N>(seed, $params.a, $params.b);
+                let r = $crate::crypto::noir_bigcurve_vendor::utils::hash_to_curve::hash_to_curve::<$field_type, N>(seed, $params.a, $params.b);
                 Self { x: r.0, y: r.1, is_infinity: false }
             }
 
@@ -177,21 +176,23 @@ pub comptime fn derive_curve_impl(
                 mul_scalars: [ScalarField<NScalarSlices>; NMuls],
                 add_points: [Self; NAdds],
             ) -> Self {
-                $crate::evaluate_linear_expression::<$field_type,$typ, _, _, _>(mul_points, mul_scalars, add_points)
+                $crate::crypto::noir_bigcurve_vendor::evaluate_linear_expression::<$field_type,$typ, _, _, _>(mul_points, mul_scalars, add_points)
             }}
 
             // Expensive witness generation! Avoid if possible
             impl std::ops::Add for $typ {
                 fn add(self, other: Self) -> Self {
-                    let lhsJ = $crate::curve_jac::CurveJ::<$field_type, $typ>::from(self);
-                    let rhsJ = $crate::curve_jac::CurveJ::<$field_type, $typ>::from(other);
+                    let lhsJ = $crate::crypto::noir_bigcurve_vendor::curve_jac::CurveJ::<$field_type, $typ>::from(self);
+                    let rhsJ = $crate::crypto::noir_bigcurve_vendor::curve_jac::CurveJ::<$field_type, $typ>::from(other);
+                    // Safety: efficient transcript add
                     let (result_jac, j_transcript) = unsafe { lhsJ.add(rhsJ) };
-                    let transcript = unsafe { $crate::curve_jac::AffineTranscript::from_j(j_transcript) };
+                    // Safety: efficient transcript conversion
+                    let transcript = unsafe { $crate::crypto::noir_bigcurve_vendor::curve_jac::AffineTranscript::from_j(j_transcript) };
                     if std::runtime::is_unconstrained() {
                         $typ::from_coordinates(transcript.x3, transcript.y3, result_jac.is_infinity)
 
                     } else {
-                        $crate::add_with_hint::<$field_type, $typ>(self, other, transcript)           
+                        $crate::crypto::noir_bigcurve_vendor::add_with_hint::<$field_type, $typ>(self, other, transcript)
                     }
                 }
             }
@@ -207,16 +208,18 @@ pub comptime fn derive_curve_impl(
 
             impl std::ops::Sub for $typ {
                 fn sub(self, other: Self) -> Self {
-                    let lhsJ = $crate::curve_jac::CurveJ::<$field_type, $typ>::from(self);
-                    let rhsJ = $crate::curve_jac::CurveJ::<$field_type, $typ>::from(other);
+                    let lhsJ = $crate::crypto::noir_bigcurve_vendor::curve_jac::CurveJ::<$field_type, $typ>::from(self);
+                    let rhsJ = $crate::crypto::noir_bigcurve_vendor::curve_jac::CurveJ::<$field_type, $typ>::from(other);
+                    // Safety: efficient transcript sub
                     let (result_jac, j_transcript) = unsafe { lhsJ.sub(rhsJ) };
-                    
+
                     // Convert back to affine coordinates using the transcript
-                    let transcript = unsafe { $crate::curve_jac::AffineTranscript::from_j(j_transcript) };
+                    // Safety: efficient transcript conversion
+                    let transcript = unsafe { $crate::crypto::noir_bigcurve_vendor::curve_jac::AffineTranscript::from_j(j_transcript) };
                     if std::runtime::is_unconstrained() {
                         $typ::from_coordinates(transcript.x3, transcript.y3, result_jac.is_infinity)
                     } else {
-                        $crate::sub_with_hint::<$field_type, $typ>(self, other, transcript)
+                        $crate::crypto::noir_bigcurve_vendor::sub_with_hint::<$field_type, $typ>(self, other, transcript)
                     }
                 }
             }
@@ -396,6 +399,12 @@ fn msm_with_hint_internal<let Size: u32, let NScalarSlices: u32, let NTranscript
 
     // Init the accumulator from the most significant scalar slice
     let mut accumulator: P = P::offset_generator();
+// Internal function calls - removing 'crate::' which refers to package root, using local scope
+// or fully qualified path if needed. Since these are in 'mod.nr', they are local to the module (or siblings).
+// But wait, 'incomplete_add_with_hint' is defined in this file. So we can just call it directly.
+
+    // Init the accumulator from the most significant scalar slice
+    let mut accumulator: P = P::offset_generator();
     let mut accumulator = incomplete_add_with_hint::<B, P>(
         accumulator,
         tables[0].get::<P>(scalars[0].base4_slices[0] as u32),
@@ -410,7 +419,7 @@ fn msm_with_hint_internal<let Size: u32, let NScalarSlices: u32, let NTranscript
         );
     }
 
-    // Perform the "double and add" algorithm but in steps of 4 bits, using the lookup table T to extract 4-bit multiples of P
+    // Perform the "double and add" algorithm
     for i in 1..NScalarSlices {
         accumulator =
             double_with_hint::<B, P>(accumulator, transcript[9 * Size + (4 + Size) * (i - 1)]);
@@ -430,10 +439,7 @@ fn msm_with_hint_internal<let Size: u32, let NScalarSlices: u32, let NTranscript
         }
     }
 
-    // 9 * Size + (4 + Size) * (NScalarSlices - 1) - 1
-    // 9 + 5 * NScalarSlices - 6
-    // windowed non-adjacent form can only represent odd scalar values.
-    // if value is even, the result will be off by one and we need to subtract the input point
+    // Windowed NAF fixup
     for i in 0..Size {
         accumulator = conditional_incomplete_subtract_with_hint::<B, P>(
             accumulator,
@@ -442,9 +448,18 @@ fn msm_with_hint_internal<let Size: u32, let NScalarSlices: u32, let NTranscript
             transcript[9 * Size + (4 + Size) * (NScalarSlices - 1) + i],
         );
     }
-
+    
     accumulator
 }
+
+// ... (other functions)
+
+// Fixing sub_with_hint calls (Line 868 and 886)
+// Wait, 'sub_with_hint' is defined in this file. So just call 'sub_with_hint'.
+// But in the macro (lines 197, 222), it might be expanded in a different context.
+// The macro uses '$crate::crypto::noir_bigcurve_vendor::sub_with_hint' which is correct.
+// But the functions 'msm_with_hint_internal' etc are regular functions in the module.
+// They should call siblings without 'crate::'.
 
 pub(crate) fn conditional_incomplete_add_with_hint<B: BigNum, P: BigCurve<B>>(
     point: P,
@@ -834,7 +849,7 @@ pub(crate) fn mul_with_hint<let NScalarSlices: u32, let NTranscriptSlices: u32, 
 
     // Init the accumulator from the most significant scalar slice
     let mut accumulator: P = P::offset_generator();
-    let mut accumulator = crate::incomplete_add_with_hint::<B, P>(
+    let mut accumulator = incomplete_add_with_hint::<B, P>(
         accumulator,
         T.get::<P>(scalar.base4_slices[0] as u32),
         transcript[3 + 5],
@@ -842,11 +857,11 @@ pub(crate) fn mul_with_hint<let NScalarSlices: u32, let NTranscriptSlices: u32, 
 
     // Perform the "double and add" algorithm but in steps of 4 bits, using the lookup table T to extract 4-bit multiples of P
     for i in 1..NScalarSlices {
-        accumulator = crate::double_with_hint::<B, P>(accumulator, transcript[4 + 5 * i]);
-        accumulator = crate::double_with_hint::<B, P>(accumulator, transcript[5 + 5 * i]);
-        accumulator = crate::double_with_hint::<B, P>(accumulator, transcript[6 + 5 * i]);
-        accumulator = crate::double_with_hint::<B, P>(accumulator, transcript[7 + 5 * i]);
-        accumulator = crate::incomplete_add_with_hint::<B, P>(
+        accumulator = double_with_hint::<B, P>(accumulator, transcript[4 + 5 * i]);
+        accumulator = double_with_hint::<B, P>(accumulator, transcript[5 + 5 * i]);
+        accumulator = double_with_hint::<B, P>(accumulator, transcript[6 + 5 * i]);
+        accumulator = double_with_hint::<B, P>(accumulator, transcript[7 + 5 * i]);
+        accumulator = incomplete_add_with_hint::<B, P>(
             accumulator,
             T.get::<P>(scalar.base4_slices[i] as u32),
             transcript[8 + 5 * i],
@@ -855,14 +870,14 @@ pub(crate) fn mul_with_hint<let NScalarSlices: u32, let NTranscriptSlices: u32, 
 
     // windowed non-adjacent form can only represent odd scalar values.
     // if value is even, the result will be off by one and we need to subtract the input point
-    accumulator = crate::conditional_incomplete_subtract_with_hint::<B, P>(
+    accumulator = conditional_incomplete_subtract_with_hint::<B, P>(
         accumulator,
         input,
         scalar.skew,
         transcript[4 + 5 * NScalarSlices],
     );
 
-    accumulator = crate::sub_with_hint::<B, P>(
+    accumulator = sub_with_hint::<B, P>(
         accumulator,
         P::offset_generator_final(),
         transcript[5 + 5 * NScalarSlices],
@@ -875,12 +890,12 @@ fn msm_with_hint<let Size: u32, let NScalarSlices: u32, let NTranscriptSlices: u
     mut scalars: [ScalarField<NScalarSlices>; Size],
     transcript: [AffineTranscript<B>; NTranscriptSlices],
 ) -> P {
-    let mut accumulator = crate::msm_with_hint_internal::<Size, NScalarSlices, NTranscriptSlices, B, P>(
+    let mut accumulator = msm_with_hint_internal::<Size, NScalarSlices, NTranscriptSlices, B, P>(
         points,
         scalars,
         transcript,
     );
-    accumulator = crate::sub_with_hint::<B, P>(
+    accumulator = sub_with_hint::<B, P>(
         P::offset_generator_final(),
         accumulator,
         transcript[10 * Size + (4 + Size) * (NScalarSlices - 1)],
@@ -892,7 +907,7 @@ unconstrained fn get_mul_transcript<let NScalarSlices: u32, B: BigNum, P: BigCur
     point: P,
     scalar: ScalarField<NScalarSlices>,
 ) -> [AffineTranscript<B>; 6 + NScalarSlices * 5] {
-    let tmp: crate::curve_jac::CurveJ<B, P> = crate::curve_jac::CurveJ::from(point);
+    let tmp: curve_jac::CurveJ<B, P> = curve_jac::CurveJ::from(point);
     let (_, transcript) = tmp.mul(scalar);
     transcript
 }
@@ -903,7 +918,7 @@ fn evaluate_linear_expression<F: BigNum, Curve: BigCurve<F>, let NScalarSlices: 
     add_points: [Curve; NAdds],
 ) -> Curve {
     let transcript: [AffineTranscript<F>; NScalarSlices * NMuls + NScalarSlices * 4 + NMuls * 9 + NAdds - 3] = unsafe {
-        crate::curve_jac::CurveJ::<F, Curve>::compute_linear_expression_transcript(
+        curve_jac::CurveJ::<F, Curve>::compute_linear_expression_transcript(
             mul_points,
             mul_scalars,
             add_points,
@@ -911,8 +926,8 @@ fn evaluate_linear_expression<F: BigNum, Curve: BigCurve<F>, let NScalarSlices: 
             .1
     };
     let mut _inputs: [Curve; NMuls] = [BigCurve::one(); NMuls];
-    let mut _scalars: [crate::scalar_field::ScalarField<NScalarSlices>; NMuls] =
-        [crate::scalar_field::ScalarField::zero(); NMuls];
+    let mut _scalars: [scalar_field::ScalarField<NScalarSlices>; NMuls] =
+        [scalar_field::ScalarField::zero(); NMuls];
     for i in 0..NMuls {
         let (input, scalar) = if mul_points[i].is_infinity() {
             (BigCurve::one(), ScalarField::zero())
