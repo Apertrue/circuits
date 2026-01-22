@@ -44,6 +44,12 @@ pub global MAX_CLAIM_SIZE: u32 = 2048;
 /// RESTORED to 1024 for full assertion hash verification
 pub global MAX_EXIF_ASSERTION_SIZE: u32 = 1024;
 
+/// Maximum size of c2pa.actions assertion bytes we'll hash in-circuit
+/// Actions assertions contain edit history (c2pa.created, c2pa.edited, etc.)
+/// and AI generation indicators (digitalSourceType: trainedAlgorithmicMedia)
+/// NOTE: Adobe Photoshop actions assertions can be 1200-1500 bytes, so 2048 provides headroom
+pub global MAX_ACTIONS_ASSERTION_SIZE: u32 = 2048;
+
 /// SHA256 hash output size
 pub global HASH_SIZE: u32 = 32;
 
@@ -54,6 +60,10 @@ pub global HASH_SIZE: u32 = 32;
  * The signature verifies over claim_hash, so if this passes,
  * we know claim_bytes are authentic.
  *
+ * IMPORTANT: Uses sha256_var to hash only the first claim_length bytes,
+ * not the full padded array. The expected hash is SHA256 of the actual
+ * claim bytes, not the padded version.
+ *
  * @param claim_bytes Raw CBOR claim bytes (padded to MAX_CLAIM_SIZE)
  * @param claim_length Actual length of claim bytes
  * @param expected_claim_hash Pre-computed SHA256(claim_bytes) - same as signature input
@@ -63,13 +73,9 @@ pub fn verify_claim_hash(
     claim_length: u32,
     expected_claim_hash: [u8; 32]
 ) {
-    // Create the actual claim slice to hash
-    // We need to hash exactly claim_length bytes, not the padded array
-    // Noir's sha256 takes a fixed-size array, so we'll hash the full array
-    // but the caller must ensure proper padding (zeros after claim_length)
-
-    // Compute SHA256 of claim_bytes using the sha256 library
-    let computed_hash: [u8; 32] = dep::sha256::digest(claim_bytes);
+    // Compute SHA256 of the ACTUAL claim bytes (not padded)
+    // sha256_var hashes only the first claim_length bytes
+    let computed_hash: [u8; 32] = dep::sha256::sha256_var(claim_bytes, claim_length as u64);
 
     // Verify match
     for i in 0..32 {
@@ -117,6 +123,10 @@ pub fn extract_assertion_hash_from_claim(
  * Combined with verify_claim_hash, this creates a complete chain:
  *   Signature -> Claim -> Assertion -> Metadata
  *
+ * IMPORTANT: Uses sha256_var to hash only the first assertion_length bytes,
+ * not the full padded array. The expected hash is SHA256 of the actual
+ * assertion bytes, not the padded version.
+ *
  * @param assertion_bytes Raw assertion bytes (CBOR or JSON, padded)
  * @param assertion_length Actual length of assertion bytes
  * @param expected_hash Hash extracted from claim's assertion reference
@@ -126,8 +136,9 @@ pub fn verify_assertion_hash(
     assertion_length: u32,
     expected_hash: [u8; 32]
 ) {
-    // Compute SHA256 of assertion_bytes using the sha256 library
-    let computed_hash: [u8; 32] = dep::sha256::digest(assertion_bytes);
+    // Compute SHA256 of the ACTUAL assertion bytes (not padded)
+    // sha256_var hashes only the first assertion_length bytes
+    let computed_hash: [u8; 32] = dep::sha256::sha256_var(assertion_bytes, assertion_length as u64);
 
     // Verify match
     for i in 0..32 {
@@ -399,6 +410,62 @@ pub fn verify_assertion_chain(
 
     // Silence unused warning
     let _ = assertion_length;
+}
+
+/**
+ * Verify actions assertion hash matches SHA256(actions_assertion_bytes)
+ *
+ * This is the same as verify_assertion_hash but for the larger actions buffer.
+ * Actions assertions (c2pa.actions.v2) can be up to 2048 bytes (Adobe Photoshop).
+ *
+ * IMPORTANT: Uses sha256_var to hash only the first assertion_length bytes,
+ * not the full padded array. The expected hash is SHA256 of the actual
+ * assertion bytes, not the padded version.
+ *
+ * @param assertion_bytes Raw assertion bytes (CBOR, padded to MAX_ACTIONS_ASSERTION_SIZE)
+ * @param assertion_length Actual length of assertion bytes
+ * @param expected_hash Hash extracted from claim's assertion reference
+ */
+pub fn verify_actions_assertion_hash(
+    assertion_bytes: [u8; MAX_ACTIONS_ASSERTION_SIZE],
+    assertion_length: u32,
+    expected_hash: [u8; 32]
+) {
+    // Compute SHA256 of the ACTUAL assertion bytes (not padded)
+    // sha256_var hashes only the first assertion_length bytes
+    let computed_hash: [u8; 32] = dep::sha256::sha256_var(assertion_bytes, assertion_length as u64);
+
+    // Verify match
+    for i in 0..32 {
+        assert(
+            computed_hash[i] == expected_hash[i],
+            "Actions assertion hash verification failed: assertion_bytes do not match expected hash"
+        );
+    }
+}
+
+/**
+ * Verify actions assertion hash chain (without redundant claim hash check)
+ *
+ * Use this for c2pa.actions.v2 assertions which can be up to 2048 bytes.
+ * Verifies: SHA256(actions_assertion_bytes) == hash in claim at offset
+ *
+ * @param claim_bytes Raw claim bytes (already verified via claim_hash)
+ * @param assertion_hash_offset Where assertion hash appears in claim
+ * @param assertion_bytes Raw actions assertion bytes (up to 2048 bytes)
+ * @param assertion_length Actual assertion length
+ */
+pub fn verify_actions_assertion_chain(
+    claim_bytes: [u8; MAX_CLAIM_SIZE],
+    assertion_hash_offset: u32,
+    assertion_bytes: [u8; MAX_ACTIONS_ASSERTION_SIZE],
+    assertion_length: u32
+) {
+    // Extract assertion hash from claim
+    let assertion_hash = extract_assertion_hash_from_claim(claim_bytes, assertion_hash_offset);
+
+    // Verify assertion bytes hash to the expected hash
+    verify_actions_assertion_hash(assertion_bytes, assertion_length, assertion_hash);
 }
 
 // Tests

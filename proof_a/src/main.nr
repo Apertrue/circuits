@@ -14,10 +14,12 @@ mod hash_chain;
 use hash_chain::{
     MAX_CLAIM_SIZE,
     MAX_EXIF_ASSERTION_SIZE,
+    MAX_ACTIONS_ASSERTION_SIZE,
     verify_full_hash_chain,
     verify_claim_hash,
     verify_content_hash_in_claim,
     verify_assertion_chain,
+    verify_actions_assertion_chain,
 };
 
 // Constants
@@ -153,6 +155,17 @@ fn main(
     // Actual length of EXIF assertion bytes
     exif_assertion_length: u32,
 
+    // === PRIVATE: ACTIONS ASSERTION (c2pa.actions.v2) ===
+    // Byte offset where actions assertion hash appears in claim
+    // If offset = 0, skip actions assertion verification (optional assertion)
+    actions_assertion_hash_offset: u32,
+    // Raw actions assertion bytes (padded to MAX_ACTIONS_ASSERTION_SIZE)
+    // Contains edit history: c2pa.created, c2pa.edited, digitalSourceType, etc.
+    // NOTE: Adobe Photoshop actions can be 1200-1500 bytes, so using 2048 for headroom
+    actions_assertion_bytes: [u8; 2048],  // MAX_ACTIONS_ASSERTION_SIZE = 2048
+    // Actual length of actions assertion bytes
+    actions_assertion_length: u32,
+
     // === PRIVATE: COMMITMENT SALTS (for optional future reveal) ===
     // These salts enable users to later prove exact values to specific parties
     // (e.g., courts, investigators) without regenerating from original image.
@@ -165,7 +178,7 @@ fn main(
     //
     location_salt: Field,  // Random salt for location commitment
     time_salt: Field       // Random salt for time commitment
-) -> pub (Field, Field) {  // Returns (location_commitment, time_commitment)
+) -> pub (Field, Field, [u8; 32]) {  // Returns (location_commitment, time_commitment, actions_assertion_hash)
     // ================================================================
     println(f"Cert Algorithm: {cert_algorithm}");
     // STEP 1: Verify RSA Signature (Root/Intermediate validates Leaf)
@@ -513,6 +526,39 @@ fn main(
     // be verified to extract values at exact positions in assertion_bytes.
 
     // ================================================================
+    // STEP 8d: Verify actions assertion hash chain (OPTIONAL)
+    // ================================================================
+    // The c2pa.actions.v2 assertion contains edit history and AI indicators.
+    // If actions_assertion_hash_offset > 0, verify the hash chain.
+    // If offset == 0, skip verification (actions assertion not present).
+    //
+    // The computed hash is ALWAYS returned as a public output, allowing
+    // verifiers to re-parse the actions bytes off-chain and extract:
+    //   - isAiGenerated (digitalSourceType == "trainedAlgorithmicMedia")
+    //   - Edit history (c2pa.created, c2pa.edited, c2pa.opened, etc.)
+    //   - Software agents used for edits
+    //
+    // This approach (Option B) avoids in-circuit CBOR parsing while still
+    // providing cryptographic binding to the signed claim.
+    let actions_assertion_hash: [u8; 32] = if actions_assertion_hash_offset > 0 {
+        // Verify actions assertion hash chain using the 2048-byte buffer function
+        verify_actions_assertion_chain(
+            claim_bytes,
+            actions_assertion_hash_offset,
+            actions_assertion_bytes,
+            actions_assertion_length
+        );
+        // Compute and return the hash for public output
+        // IMPORTANT: Use sha256_var to hash only the actual bytes (not padded)
+        // This matches what verify_actions_assertion_chain uses internally
+        let hash_result: [u8; 32] = dep::sha256::sha256_var(actions_assertion_bytes, actions_assertion_length as u64);
+        hash_result
+    } else {
+        // No actions assertion - return zero hash
+        [0u8; 32]
+    };
+
+    // ================================================================
     // STEP 9: Compute Poseidon Commitments (Optional Future Reveal)
     // ================================================================
     // These commitments allow users to later prove exact values to specific
@@ -552,8 +598,8 @@ fn main(
         2  // input length
     );
 
-    // Return commitments as public outputs
-    (location_commitment, time_commitment)
+    // Return commitments and actions hash as public outputs
+    (location_commitment, time_commitment, actions_assertion_hash)
 }
 
 /// Convert 32 bytes to Field (big-endian)
