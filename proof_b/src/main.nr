@@ -1,13 +1,25 @@
-/// Apertrue ProofB - COSE Signature + Merkle Membership
+/// Apertrue ProofB - COSE Signature + Merkle Membership + Hash Chain Binding
 ///
 /// This is the second half of the split-proof architecture for RSA-4096 support.
 ///
 /// ProofB proves:
 /// 1. A valid COSE signature exists (ES256 or PS256) using the leaf key
-/// 2. The intermediate CA is in the Oracle's promoted trust list (Merkle membership)
-/// 3. The blinded link commitment matches (links to ProofA without revealing intermediate)
-/// 4. The nullifier is correctly derived from the leaf key and content hash
-/// 5. Certificate validity at proof time
+/// 2. The COSE signature is over a Sig_structure containing the claim (SECURITY FIX HIGH-3)
+/// 3. The claim_hash matches SHA256(claim_bytes) (binds to ProofA)
+/// 4. The intermediate CA is in the Oracle's promoted trust list (Merkle membership)
+/// 5. The blinded link commitment matches (includes claim_hash for full binding)
+/// 6. The nullifier is correctly derived from the leaf key and content hash
+/// 7. Certificate validity at proof time
+///
+/// SECURITY: This circuit now fully verifies the binding between:
+///   - The COSE signature (what the device actually signed)
+///   - The claim_bytes (which contain content_hash)
+///   - ProofA (via link_commit including claim_hash)
+///
+/// This prevents the "malicious extractor" attack where an attacker could:
+///   - Use a valid COSE signature from Image B
+///   - Create fake claim_bytes for Image A
+///   - Generate a "valid" proof for Image A
 ///
 /// PUBLIC INPUTS (shared with ProofA - must match):
 /// - trust_list_root: Oracle's Merkle root
@@ -16,16 +28,18 @@
 /// - proof_timestamp: When proof was generated
 /// - cert_not_before: Certificate validity start
 /// - cert_not_after: Certificate validity end
-/// - link_commit: pedersen_hash([intermediate_leaf, link_blind])
+/// - link_commit: pedersen_hash([intermediate_leaf, claim_hash_field, link_blind])
 ///
 /// PRIVATE INPUTS:
 /// - COSE signature and leaf key (ECDSA or RSA-2048)
-/// - COSE message hash (SHA256 of Sig_structure)
+/// - Sig_structure bytes (what was actually signed)
+/// - Claim bytes (embedded in Sig_structure)
 /// - Intermediate leaf value and link_blind
 /// - Merkle path for intermediate
 
 use std::ecdsa_secp256r1::verify_signature;
 use std::hash::pedersen_hash;
+use dep::sha256::sha256_var;
 
 // RSA verification from noir_rsa (zkpassport fork with PSS support)
 use noir_rsa::rsa::verify_sha256_pss;
@@ -37,6 +51,14 @@ global MERKLE_TREE_DEPTH: u32 = 8;
 
 /// RSA-2048 uses 18 limbs of 120 bits
 global RSA_NUM_LIMBS: u32 = 18;
+
+/// Maximum size of COSE Sig_structure (CBOR encoded)
+/// Sig_structure = ["Signature1", protected_headers, external_aad, payload]
+/// Typical size: 50-100 bytes header + claim_bytes
+global MAX_SIG_STRUCTURE_SIZE: u32 = 2560;
+
+/// Maximum size of C2PA claim (CBOR encoded)
+global MAX_CLAIM_SIZE: u32 = 2048;
 
 /// Algorithm selectors
 global ALG_ECDSA: Field = 0;
@@ -75,7 +97,19 @@ fn main(
 
     // === PRIVATE: MERKLE MEMBERSHIP ===
     merkle_path: [Field; MERKLE_TREE_DEPTH],
-    merkle_indices: [Field; MERKLE_TREE_DEPTH]
+    merkle_indices: [Field; MERKLE_TREE_DEPTH],
+
+    // === PRIVATE: SIG_STRUCTURE VERIFICATION (SECURITY FIX HIGH-3) ===
+    // These inputs prove that cose_message_hash was computed from a Sig_structure
+    // that actually contains the claim_bytes, preventing malicious extractor attacks
+    sig_structure_bytes: [u8; MAX_SIG_STRUCTURE_SIZE],  // CBOR: ["Signature1", headers, aad, payload]
+    sig_structure_length: u32,                          // Actual length (variable-size)
+
+    // === PRIVATE: CLAIM VERIFICATION ===
+    claim_bytes: [u8; MAX_CLAIM_SIZE],    // Raw CBOR-encoded C2PA claim
+    claim_length: u32,                     // Actual length of claim
+    claim_offset_in_sig: u32,              // Byte offset where claim appears in sig_structure
+    claim_hash: [u8; 32]                   // SHA256(claim_bytes) - binds to ProofA
 ) {
     // Validate algorithm selector
     assert((cose_algorithm == ALG_ECDSA) | (cose_algorithm == ALG_RSA), "Invalid COSE algorithm");
@@ -107,33 +141,77 @@ fn main(
     }
 
     // ================================================================
-    // STEP 2: Verify Merkle membership for intermediate
+    // STEP 2: Verify sig_structure hash matches cose_message_hash
+    // (SECURITY FIX HIGH-3: Prevents malicious extractor attack)
+    // ================================================================
+    // The COSE signature is over SHA256(Sig_structure)
+    // We verify that the provided sig_structure_bytes actually hashes to cose_message_hash
+    let computed_sig_hash = sha256_var(sig_structure_bytes, sig_structure_length as u64);
+    assert(computed_sig_hash == cose_message_hash, "Sig_structure hash does not match COSE message hash");
+
+    // ================================================================
+    // STEP 3: Verify claim_bytes embedded in sig_structure
+    // (SECURITY FIX HIGH-3: Proves the signed data contains this claim)
+    // ================================================================
+    // The Sig_structure's payload field contains the claim_bytes
+    // We verify the claim_bytes appear at the expected offset
+    verify_bytes_embedded(
+        sig_structure_bytes,
+        sig_structure_length,
+        claim_bytes,
+        claim_length,
+        claim_offset_in_sig
+    );
+
+    // ================================================================
+    // STEP 4: Verify claim_hash matches SHA256(claim_bytes)
+    // (SECURITY FIX HIGH-3: Binds to ProofA via link_commit)
+    // ================================================================
+    let computed_claim_hash = sha256_var(claim_bytes, claim_length as u64);
+    assert(computed_claim_hash == claim_hash, "Claim hash mismatch - claim_bytes integrity violated");
+
+    // ================================================================
+    // STEP 5: Verify Merkle membership for intermediate
     // ================================================================
     let computed_root = compute_merkle_root(intermediate_leaf, merkle_path, merkle_indices);
     assert(computed_root == trust_list_root, "Intermediate not in trust list");
 
     // ================================================================
-    // STEP 3: Verify link commitment (binds to ProofA)
+    // STEP 6: Verify link commitment (binds to ProofA via claim_hash)
+    // (SECURITY FIX HIGH-3: Include claim_hash for full binding)
     // ================================================================
-    let expected_link_commit = pedersen_hash([intermediate_leaf, link_blind]);
+    // Convert claim_hash [u8; 32] to Field for pedersen_hash
+    let claim_hash_field = bytes_to_field(claim_hash);
+    let expected_link_commit = pedersen_hash([intermediate_leaf, claim_hash_field, link_blind]);
     assert(link_commit == expected_link_commit, "Link commitment mismatch");
 
     // ================================================================
-    // STEP 4: Verify nullifier derivation (binds leaf key to content)
+    // STEP 7: Verify nullifier derivation (binds leaf key to content)
     // ================================================================
+    // SECURITY FIX (MEDIUM-2): Hash 8 RSA limbs (1024 bits) for collision resistance
     let leaf_pubkey_hash = if cose_algorithm == ALG_ECDSA {
         let leaf_x_field = bytes_to_field(leaf_pubkey_x);
         let leaf_y_field = bytes_to_field(leaf_pubkey_y);
         pedersen_hash([leaf_x_field, leaf_y_field])
     } else {
-        pedersen_hash([leaf_rsa_modulus_limbs[0] as Field, leaf_rsa_modulus_limbs[1] as Field])
+        // Hash 8 limbs (1024 bits) for strong collision resistance
+        pedersen_hash([
+            leaf_rsa_modulus_limbs[0] as Field,
+            leaf_rsa_modulus_limbs[1] as Field,
+            leaf_rsa_modulus_limbs[2] as Field,
+            leaf_rsa_modulus_limbs[3] as Field,
+            leaf_rsa_modulus_limbs[4] as Field,
+            leaf_rsa_modulus_limbs[5] as Field,
+            leaf_rsa_modulus_limbs[6] as Field,
+            leaf_rsa_modulus_limbs[7] as Field
+        ])
     };
 
     let expected_nullifier = pedersen_hash([content_hash, leaf_pubkey_hash]);
     assert(nullifier == expected_nullifier, "Invalid nullifier");
 
     // ================================================================
-    // STEP 5: Verify certificate validity at proof time
+    // STEP 8: Verify certificate validity at proof time
     // ================================================================
     let ts = proof_timestamp as u64;
     let not_before = cert_not_before as u64;
@@ -170,19 +248,49 @@ fn compute_merkle_root(
     current
 }
 
+/// Verify that inner_bytes appears at offset within outer_bytes
+/// This is critical for proving claim_bytes is embedded in sig_structure
+fn verify_bytes_embedded(
+    outer_bytes: [u8; MAX_SIG_STRUCTURE_SIZE],
+    outer_length: u32,
+    inner_bytes: [u8; MAX_CLAIM_SIZE],
+    inner_length: u32,
+    offset: u32
+) {
+    // Bounds check: inner must fit within outer
+    assert(offset + inner_length <= outer_length, "Inner bytes would exceed outer bounds");
+
+    // Verify each byte of inner appears at the correct position in outer
+    for i in 0..MAX_CLAIM_SIZE {
+        // Only check bytes within the actual inner_length
+        if i < inner_length {
+            let outer_idx = offset + i;
+            assert(outer_bytes[outer_idx] == inner_bytes[i], "Embedded bytes mismatch");
+        }
+    }
+}
+
 // ====================================================================
 // TESTS
 // ====================================================================
 
 #[test]
-fn test_link_commitment() {
+fn test_link_commitment_with_claim_hash() {
     let intermediate_leaf: Field = 12345;
+    let claim_hash_field: Field = 99999;
     let link_blind: Field = 67890;
-    let commit = pedersen_hash([intermediate_leaf, link_blind]);
-    
+
+    // New format includes claim_hash for full ProofA<->ProofB binding
+    let commit = pedersen_hash([intermediate_leaf, claim_hash_field, link_blind]);
+
     // Verify same inputs produce same output
-    let commit2 = pedersen_hash([intermediate_leaf, link_blind]);
+    let commit2 = pedersen_hash([intermediate_leaf, claim_hash_field, link_blind]);
     assert(commit == commit2);
+
+    // Different claim_hash -> different commitment
+    let different_claim: Field = 11111;
+    let commit3 = pedersen_hash([intermediate_leaf, different_claim, link_blind]);
+    assert(commit != commit3);
 }
 
 #[test]
@@ -190,9 +298,58 @@ fn test_nullifier_derivation() {
     let content_hash: Field = 111;
     let leaf_key_hash: Field = 222;
     let nullifier = pedersen_hash([content_hash, leaf_key_hash]);
-    
+
     // Different content hash -> different nullifier
     let different_content: Field = 333;
     let different_nullifier = pedersen_hash([different_content, leaf_key_hash]);
     assert(nullifier != different_nullifier);
+}
+
+#[test]
+fn test_verify_bytes_embedded() {
+    // Create outer array with some data
+    let mut outer: [u8; MAX_SIG_STRUCTURE_SIZE] = [0; MAX_SIG_STRUCTURE_SIZE];
+    outer[0] = 0x84; // CBOR array(4)
+    outer[1] = 0x6A; // text(10)
+    // "Signature1" at bytes 2-11
+    outer[2] = 0x53; // S
+    outer[3] = 0x69; // i
+    outer[4] = 0x67; // g
+    outer[5] = 0x6E; // n
+    outer[6] = 0x61; // a
+    outer[7] = 0x74; // t
+    outer[8] = 0x75; // u
+    outer[9] = 0x72; // r
+    outer[10] = 0x65; // e
+    outer[11] = 0x31; // 1
+    // Claim bytes embedded at offset 100
+    outer[100] = 0xAA;
+    outer[101] = 0xBB;
+    outer[102] = 0xCC;
+    outer[103] = 0xDD;
+
+    // Create inner array (the claim)
+    let mut inner: [u8; MAX_CLAIM_SIZE] = [0; MAX_CLAIM_SIZE];
+    inner[0] = 0xAA;
+    inner[1] = 0xBB;
+    inner[2] = 0xCC;
+    inner[3] = 0xDD;
+
+    // This should pass - bytes match at offset
+    verify_bytes_embedded(outer, 200, inner, 4, 100);
+}
+
+#[test]
+fn test_sig_structure_hash() {
+    // Test that sha256_var produces consistent results
+    let mut data: [u8; MAX_SIG_STRUCTURE_SIZE] = [0; MAX_SIG_STRUCTURE_SIZE];
+    data[0] = 0x84; // CBOR array(4)
+    data[1] = 0x6A; // text(10)
+    data[2] = 0x53; // S
+
+    let hash1 = sha256_var(data, 3);
+    let hash2 = sha256_var(data, 3);
+
+    // Same data should produce same hash
+    assert(hash1 == hash2);
 }

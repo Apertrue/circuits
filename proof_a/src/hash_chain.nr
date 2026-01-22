@@ -36,10 +36,12 @@
 
 /// Maximum size of claim bytes we'll hash in-circuit
 /// Claims larger than this should use the pre-computed hash approach
-pub global MAX_CLAIM_SIZE: u32 = 2048;
+/// REDUCED from 2048 to 1024 to help with proof generation memory/stack limits
+pub global MAX_CLAIM_SIZE: u32 = 1024;
 
 /// Maximum size of EXIF assertion bytes we'll hash in-circuit
-pub global MAX_EXIF_ASSERTION_SIZE: u32 = 1024;
+/// REDUCED from 1024 to 512 to help with proof generation memory/stack limits
+pub global MAX_EXIF_ASSERTION_SIZE: u32 = 512;
 
 /// SHA256 hash output size
 pub global HASH_SIZE: u32 = 32;
@@ -322,7 +324,84 @@ pub fn verify_timestamp_binding(
     );
 }
 
+/**
+ * Verify content hash exists in claim at specified offset
+ *
+ * SECURITY: This binds the public content_hash to the signed claim.
+ * Without this verification, a malicious client could substitute
+ * a different image's content_hash while keeping the valid signature.
+ *
+ * @param claim_bytes Raw claim bytes (CBOR encoded)
+ * @param content_hash_offset Byte offset where content hash appears in claim
+ * @param expected_content_hash The content hash (Field) to verify
+ */
+pub fn verify_content_hash_in_claim(
+    claim_bytes: [u8; MAX_CLAIM_SIZE],
+    content_hash_offset: u32,
+    expected_content_hash: Field
+) {
+    // Bounds check
+    assert(
+        content_hash_offset + 32 <= MAX_CLAIM_SIZE,
+        "Content hash offset out of bounds"
+    );
+
+    // Extract 32 bytes from claim at offset and convert to Field
+    let mut extracted_hash: Field = 0;
+    for i in 0..32 {
+        extracted_hash = extracted_hash * 256 + claim_bytes[content_hash_offset + i] as Field;
+    }
+
+    // Verify the extracted content hash matches the public input
+    assert(
+        extracted_hash == expected_content_hash,
+        "Content hash binding failed: public content_hash does not match value in signed claim"
+    );
+}
+
+/**
+ * Verify assertion hash chain (without redundant claim hash check)
+ *
+ * Use this when claim_hash has already been verified separately.
+ * Verifies: SHA256(assertion_bytes) == hash in claim at offset
+ *
+ * @param claim_bytes Raw claim bytes (already verified via claim_hash)
+ * @param assertion_hash_offset Where assertion hash appears in claim
+ * @param assertion_bytes Raw assertion bytes
+ * @param assertion_length Actual assertion length
+ */
+pub fn verify_assertion_chain(
+    claim_bytes: [u8; MAX_CLAIM_SIZE],
+    assertion_hash_offset: u32,
+    assertion_bytes: [u8; MAX_EXIF_ASSERTION_SIZE],
+    assertion_length: u32
+) {
+    // Extract assertion hash from claim
+    let assertion_hash = extract_assertion_hash_from_claim(claim_bytes, assertion_hash_offset);
+
+    // Verify assertion bytes hash to the expected hash
+    verify_assertion_hash(assertion_bytes, assertion_length, assertion_hash);
+
+    // Silence unused warning
+    let _ = assertion_length;
+}
+
 // Tests
+#[test]
+fn test_content_hash_binding() {
+    let mut claim_bytes: [u8; MAX_CLAIM_SIZE] = [0; MAX_CLAIM_SIZE];
+
+    // Place a known content hash at offset 100
+    // Content hash as bytes: 0x0000...0001 (just 1 for simplicity)
+    claim_bytes[131] = 1;  // Last byte = 1
+
+    // Expected field value is 1
+    let expected_hash: Field = 1;
+
+    // This should pass
+    verify_content_hash_in_claim(claim_bytes, 100, expected_hash);
+}
+
 #[test]
 fn test_extract_assertion_hash() {
     // Create test claim bytes with a known hash at offset 10
