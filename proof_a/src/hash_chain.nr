@@ -36,12 +36,13 @@
 
 /// Maximum size of claim bytes we'll hash in-circuit
 /// Claims larger than this should use the pre-computed hash approach
-/// REDUCED from 2048 to 1024 to help with proof generation memory/stack limits
-pub global MAX_CLAIM_SIZE: u32 = 1024;
+/// RESTORED to 2048 for full cryptographic hash chain verification
+/// ProofMode claims are ~1299 bytes, so 2048 provides sufficient headroom
+pub global MAX_CLAIM_SIZE: u32 = 2048;
 
 /// Maximum size of EXIF assertion bytes we'll hash in-circuit
-/// REDUCED from 1024 to 512 to help with proof generation memory/stack limits
-pub global MAX_EXIF_ASSERTION_SIZE: u32 = 512;
+/// RESTORED to 1024 for full assertion hash verification
+pub global MAX_EXIF_ASSERTION_SIZE: u32 = 1024;
 
 /// SHA256 hash output size
 pub global HASH_SIZE: u32 = 32;

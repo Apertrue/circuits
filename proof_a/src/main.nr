@@ -140,15 +140,16 @@ fn main(
     // Enable hash chain verification (0 = disabled for backwards compatibility)
     enable_hash_chain_verification: u8,
     // Raw claim bytes (CBOR-encoded, padded to MAX_CLAIM_SIZE)
-    // REDUCED from 2048 to help with proof generation memory/stack limits
-    claim_bytes: [u8; 1024],  // MAX_CLAIM_SIZE = 1024 (most claims are under 1KB)
+    // RESTORED to 2048 for full cryptographic hash chain verification
+    // ProofMode claims are ~1299 bytes, requiring buffer > 1024
+    claim_bytes: [u8; 2048],  // MAX_CLAIM_SIZE = 2048
     // Actual length of claim bytes
     claim_length: u32,
     // Byte offset where EXIF assertion hash appears in claim
     exif_assertion_hash_offset: u32,
     // Raw EXIF assertion bytes (padded to MAX_EXIF_ASSERTION_SIZE)
-    // REDUCED from 1024 to help with proof generation memory/stack limits
-    exif_assertion_bytes: [u8; 512],  // MAX_EXIF_ASSERTION_SIZE = 512
+    // RESTORED to 1024 for full assertion hash verification
+    exif_assertion_bytes: [u8; 1024],  // MAX_EXIF_ASSERTION_SIZE = 1024
     // Actual length of EXIF assertion bytes
     exif_assertion_length: u32,
 
@@ -578,7 +579,7 @@ fn bytes48_to_field(bytes: [u8; 48]) -> Field {
 /// This function binds the public content_hash to the signed claim bytes.
 /// Without this, a malicious client could substitute any content_hash.
 fn verify_content_hash_binding(
-    claim_bytes: [u8; 1024],  // REDUCED from 2048
+    claim_bytes: [u8; 2048],  // RESTORED to 2048 for full hash chain verification
     content_hash_offset: u32,
     expected_content_hash: Field
 ) {
