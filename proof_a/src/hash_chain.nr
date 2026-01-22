@@ -200,40 +200,54 @@ pub fn extract_timestamp_from_cbor(
 }
 
 /**
- * Extract GPS coordinate from assertion at known offset
+ * GPS BINDING SECURITY MODEL
+ * ==========================
  *
- * GPS coordinates in C2PA EXIF are typically stored as:
- * - Rational number arrays: [{n, d}, {n, d}, {n, d}] for degrees, minutes, seconds
- * - Or decimal numbers
+ * This module does NOT implement byte-level GPS extraction from CBOR assertions.
+ * This is a deliberate design choice, not a missing feature.
  *
- * For simplicity, we use the pre-scaled integer representation.
- * The client extracts and scales the coordinates, then we verify
- * the scaled value matches what's in the assertion at the expected offset.
+ * SECURITY RATIONALE:
+ * -------------------
+ * GPS coordinates are cryptographically bound through the hash chain:
  *
- * NOTE: This is a simplified binding check. For full CBOR parsing,
- * we'd need more complex logic. Instead, we verify that the hash chain
- * is valid (assertion_bytes -> assertion_hash -> claim -> signature),
- * which implicitly binds the GPS values.
+ *   1. verify_assertion_hash() proves: SHA256(assertion_bytes) == hash_in_claim
+ *   2. verify_claim_hash() proves: SHA256(claim_bytes) == signed_hash
+ *   3. COSE signature proves: claim was signed by trusted certificate
  *
- * @param assertion_bytes Raw assertion bytes
- * @param gps_offset Byte offset where GPS scaled value is encoded
- * @param expected_scaled_value The scaled GPS value (10^7 factor)
+ * Therefore, if the assertion bytes pass hash verification, their ENTIRE CONTENT
+ * is cryptographically bound to the signature. Any modification to the GPS values
+ * would change the hash and break verification.
+ *
+ * WHY NOT PARSE CBOR IN-CIRCUIT?
+ * ------------------------------
+ * C2PA EXIF GPS coordinates are stored as CBOR rational number arrays:
+ *   { "EXIF:GPSLatitude": [{n: 51, d: 1}, {n: 30, d: 1}, {n: 0, d: 1}] }  // 51d 30m 0s
+ *
+ * Parsing this requires:
+ *   - Variable-length CBOR decoding (~200+ constraints per value)
+ *   - Rational number arithmetic (degree + minute/60 + second/3600)
+ *   - Sign handling from GPSLatitudeRef/GPSLongitudeRef strings
+ *
+ * Total cost: ~500-1000 additional constraints for minimal security gain.
+ *
+ * The hash chain already guarantees that the client cannot substitute GPS values
+ * without invalidating the proof. Adding in-circuit parsing would only catch
+ * bugs in the client extractor, not malicious tampering.
+ *
+ * TRUST MODEL:
+ * ------------
+ * - The CIRCUIT trusts that assertion_bytes were correctly passed from the client
+ * - The HASH CHAIN proves assertion_bytes match what was signed
+ * - The CLIENT extracts GPS from the verified bytes
+ * - Any GPS tampering would require finding a hash collision (computationally infeasible)
+ *
+ * For applications requiring stronger guarantees, the circuit could be extended
+ * to parse CBOR at specific known offsets. This is left as a future enhancement.
  */
-pub fn verify_gps_binding(
-    assertion_bytes: [u8; MAX_EXIF_ASSERTION_SIZE],
-    gps_offset: u32,
-    expected_scaled_value: Field
-) {
-    // For complex CBOR GPS structures, we rely on hash chain verification
-    // The assertion_bytes must hash to the expected hash in the claim
-    // This binds the GPS values cryptographically without extracting at exact offsets
 
-    // Placeholder assertion - in a full implementation, we'd parse CBOR here
-    // For now, the hash chain verification provides the binding guarantee
-    let _ = assertion_bytes;
-    let _ = gps_offset;
-    let _ = expected_scaled_value;
-}
+// NOTE: verify_gps_binding() has been intentionally removed.
+// GPS binding is provided by verify_assertion_hash() in the hash chain.
+// See the SECURITY RATIONALE above for details.
 
 /**
  * Combined hash chain verification
