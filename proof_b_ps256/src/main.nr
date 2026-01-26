@@ -85,7 +85,12 @@ fn main(
     claim_bytes: [u8; MAX_CLAIM_SIZE],
     claim_length: u32,
     claim_offset_in_sig: u32,
-    claim_hash: [u8; 32]
+    claim_hash: [u8; 32],
+
+    // === PUBLIC: CONTENT HASH BINDING (SECURITY FIX) ===
+    // Offset where content_hash appears in claim_bytes
+    // This binds the public content_hash to the signed claim, preventing substitution attacks
+    content_hash_offset: pub u32
 ) -> pub Field {  // Returns link_commit (computed internally)
     // ================================================================
     // STEP 1: Verify RSA COSE signature (PS256)
@@ -122,6 +127,12 @@ fn main(
     // ================================================================
     let computed_claim_hash = sha256_var(claim_bytes, claim_length as u64);
     assert(computed_claim_hash == claim_hash, "Claim hash mismatch - claim_bytes integrity violated");
+
+    // ================================================================
+    // STEP 4b: Verify content_hash exists in claim_bytes
+    // (SECURITY FIX: Prevents content_hash substitution attack)
+    // ================================================================
+    verify_content_hash_in_claim(claim_bytes, content_hash_offset, content_hash);
 
     // ================================================================
     // STEP 5: Verify Merkle membership for intermediate
@@ -192,6 +203,29 @@ fn compute_merkle_root(
     }
 
     current
+}
+
+/// Verify that content_hash (Field) appears in claim_bytes at the specified offset
+/// SECURITY: Binds public content_hash to signed claim, prevents substitution attack
+fn verify_content_hash_in_claim(
+    claim_bytes: [u8; MAX_CLAIM_SIZE],
+    content_hash_offset: u32,
+    expected_content_hash: Field
+) {
+    assert(
+        content_hash_offset + 32 <= MAX_CLAIM_SIZE,
+        "Content hash offset out of bounds"
+    );
+
+    let mut extracted_hash: Field = 0;
+    for i in 0..32 {
+        extracted_hash = extracted_hash * 256 + claim_bytes[content_hash_offset + i] as Field;
+    }
+
+    assert(
+        extracted_hash == expected_content_hash,
+        "Content hash binding failed: public content_hash does not match value in signed claim"
+    );
 }
 
 /// Verify that inner_bytes appears at offset within outer_bytes
@@ -282,4 +316,11 @@ fn test_merkle_root_computation() {
     // Different leaf -> different root
     let root3 = compute_merkle_root(leaf + 1, path, indices);
     assert(root1 != root3);
+}
+
+#[test]
+fn test_content_hash_binding() {
+    let mut claim_bytes: [u8; MAX_CLAIM_SIZE] = [0; MAX_CLAIM_SIZE];
+    claim_bytes[131] = 1;  // Place value 1 at offset 100 (big-endian)
+    verify_content_hash_in_claim(claim_bytes, 100, 1);
 }

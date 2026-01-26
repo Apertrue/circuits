@@ -115,7 +115,12 @@ fn main(
     claim_bytes: [u8; MAX_CLAIM_SIZE],    // Raw CBOR-encoded C2PA claim
     claim_length: u32,                     // Actual length of claim
     claim_offset_in_sig: u32,              // Byte offset where claim appears in sig_structure
-    claim_hash: [u8; 32]                   // SHA256(claim_bytes) - binds to ProofA
+    claim_hash: [u8; 32],                  // SHA256(claim_bytes) - binds to ProofA
+
+    // === PUBLIC: CONTENT HASH BINDING (SECURITY FIX) ===
+    // Offset where content_hash appears in claim_bytes
+    // This binds the public content_hash to the signed claim, preventing substitution attacks
+    content_hash_offset: pub u32
 ) -> pub Field {  // Returns link_commit (computed internally)
     // Validate algorithm selector
     assert((cose_algorithm == ALG_ECDSA) | (cose_algorithm == ALG_RSA), "Invalid COSE algorithm");
@@ -175,6 +180,17 @@ fn main(
     // ================================================================
     let computed_claim_hash = sha256_var(claim_bytes, claim_length as u64);
     assert(computed_claim_hash == claim_hash, "Claim hash mismatch - claim_bytes integrity violated");
+
+    // ================================================================
+    // STEP 4b: Verify content_hash exists in claim_bytes
+    // (SECURITY FIX: Prevents content_hash substitution attack)
+    //
+    // Without this check, an attacker could:
+    // - Use valid claim_bytes from Image A
+    // - Provide content_hash from Image B
+    // - Generate valid proof (claim hash verifies but wrong content)
+    // ================================================================
+    verify_content_hash_in_claim(claim_bytes, content_hash_offset, content_hash);
 
     // ================================================================
     // STEP 5: Verify Merkle membership for intermediate
@@ -259,6 +275,34 @@ fn compute_merkle_root(
     }
 
     current
+}
+
+/// Verify that content_hash (Field) appears in claim_bytes at the specified offset
+/// SECURITY: This binds the public content_hash to the signed claim.
+/// Without this check, an attacker could substitute content_hash while keeping
+/// the valid COSE signature over a different claim.
+fn verify_content_hash_in_claim(
+    claim_bytes: [u8; MAX_CLAIM_SIZE],
+    content_hash_offset: u32,
+    expected_content_hash: Field
+) {
+    // Bounds check
+    assert(
+        content_hash_offset + 32 <= MAX_CLAIM_SIZE,
+        "Content hash offset out of bounds"
+    );
+
+    // Extract 32 bytes from claim at offset and convert to Field
+    let mut extracted_hash: Field = 0;
+    for i in 0..32 {
+        extracted_hash = extracted_hash * 256 + claim_bytes[content_hash_offset + i] as Field;
+    }
+
+    // Verify the extracted content hash matches the public input
+    assert(
+        extracted_hash == expected_content_hash,
+        "Content hash binding failed: public content_hash does not match value in signed claim"
+    );
 }
 
 /// Verify that inner_bytes appears at offset within outer_bytes
@@ -365,4 +409,37 @@ fn test_sig_structure_hash() {
 
     // Same data should produce same hash
     assert(hash1 == hash2);
+}
+
+#[test]
+fn test_content_hash_binding() {
+    let mut claim_bytes: [u8; MAX_CLAIM_SIZE] = [0; MAX_CLAIM_SIZE];
+
+    // Place a known content hash at offset 100
+    // Content hash as bytes: 0x0000...0001 (just 1 for simplicity)
+    claim_bytes[131] = 1;  // Last byte = 1 (big-endian, so this is value 1)
+
+    // Expected field value is 1
+    let expected_hash: Field = 1;
+
+    // This should pass
+    verify_content_hash_in_claim(claim_bytes, 100, expected_hash);
+}
+
+#[test]
+fn test_content_hash_binding_larger_value() {
+    let mut claim_bytes: [u8; MAX_CLAIM_SIZE] = [0; MAX_CLAIM_SIZE];
+
+    // Place content hash = 0x0102030405060708...1f20 at offset 50
+    for i in 0..32 {
+        claim_bytes[50 + i] = (i + 1) as u8;
+    }
+
+    // Compute expected Field value (big-endian)
+    let mut expected: Field = 0;
+    for i in 0..32 {
+        expected = expected * 256 + (i + 1) as Field;
+    }
+
+    verify_content_hash_in_claim(claim_bytes, 50, expected);
 }
