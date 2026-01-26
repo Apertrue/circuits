@@ -54,8 +54,11 @@ global RSA_NUM_LIMBS: u32 = 18;
 
 /// Maximum size of COSE Sig_structure (CBOR encoded)
 /// Sig_structure = ["Signature1", protected_headers, external_aad, payload]
-/// Typical size: 50-100 bytes header + claim_bytes
-global MAX_SIG_STRUCTURE_SIZE: u32 = 2560;
+/// ChatGPT images have large protected headers (~2000 bytes) containing full cert chain
+/// plus claim payload (~700 bytes), totaling ~2700 bytes.
+/// Adobe Photoshop images can have larger protected headers (~3400 bytes) with cert chain
+/// plus claim payload (~1000 bytes), totaling ~4400 bytes. Use 5120 for safety margin.
+global MAX_SIG_STRUCTURE_SIZE: u32 = 5120;
 
 /// Maximum size of C2PA claim (CBOR encoded)
 global MAX_CLAIM_SIZE: u32 = 2048;
@@ -73,7 +76,8 @@ fn main(
     proof_timestamp: pub Field,
     cert_not_before: pub Field,
     cert_not_after: pub Field,
-    link_commit: pub Field,
+    // NOTE: link_commit is now COMPUTED internally and returned as OUTPUT
+    // This avoids JS/circuit Pedersen implementation mismatches
 
     // === PRIVATE: ALGORITHM SELECTOR ===
     cose_algorithm: Field,  // 0 = ECDSA (ES256), 1 = RSA (PS256)
@@ -87,6 +91,8 @@ fn main(
     cose_signature_rsa_limbs: [u128; RSA_NUM_LIMBS],
     leaf_rsa_modulus_limbs: [u128; RSA_NUM_LIMBS],
     leaf_rsa_redc_limbs: [u128; RSA_NUM_LIMBS],
+    // PSS salt length for RSA signatures (typically 32 for SHA-256, but Adobe may use 20)
+    pss_salt_len: u32,
 
     // === PRIVATE: COSE MESSAGE HASH ===
     cose_message_hash: [u8; 32],
@@ -110,7 +116,7 @@ fn main(
     claim_length: u32,                     // Actual length of claim
     claim_offset_in_sig: u32,              // Byte offset where claim appears in sig_structure
     claim_hash: [u8; 32]                   // SHA256(claim_bytes) - binds to ProofA
-) {
+) -> pub Field {  // Returns link_commit (computed internally)
     // Validate algorithm selector
     assert((cose_algorithm == ALG_ECDSA) | (cose_algorithm == ALG_RSA), "Invalid COSE algorithm");
 
@@ -134,9 +140,9 @@ fn main(
             leaf_rsa_redc_limbs
         );
         let signature: RBN2048 = RBN2048::from_array(params, cose_signature_rsa_limbs);
-        // Try with salt_len = 32 (hash output length, RFC 8152 recommendation)
-        // If this fails, Adobe might use different salt length
-        let rsa_valid = verify_sha256_pss(cose_message_hash, signature, 65537, 32);
+        // pss_salt_len: 32 = SHA-256 output length (RFC 8152), 20 = RFC 4055 default (Adobe)
+        // Common values: 32 (standard), 20 (legacy), 0 (auto-calculated from modulus)
+        let rsa_valid = verify_sha256_pss(cose_message_hash, signature, 65537, pss_salt_len);
         assert(rsa_valid, "Invalid RSA COSE signature (PS256)");
     }
 
@@ -177,13 +183,15 @@ fn main(
     assert(computed_root == trust_list_root, "Intermediate not in trust list");
 
     // ================================================================
-    // STEP 6: Verify link commitment (binds to ProofA via claim_hash)
-    // (SECURITY FIX HIGH-3: Include claim_hash for full binding)
+    // STEP 6: Compute link commitment (returned as output)
+    // (SECURITY FIX HIGH-3: Include claim_hash for full binding to ProofA)
     // ================================================================
-    // Convert claim_hash [u8; 32] to Field for pedersen_hash
+    // NOTE: link_commit is COMPUTED here and returned as OUTPUT rather than verified
+    // against a pre-computed input. This avoids JS/circuit Pedersen implementation
+    // mismatches between bb.js versions and ACVM's internal Barretenberg.
+    // The verifier checks that ProofA.link_commit == ProofB.link_commit
     let claim_hash_field = bytes_to_field(claim_hash);
-    let expected_link_commit = pedersen_hash([intermediate_leaf, claim_hash_field, link_blind]);
-    assert(link_commit == expected_link_commit, "Link commitment mismatch");
+    let link_commit = pedersen_hash([intermediate_leaf, claim_hash_field, link_blind]);
 
     // ================================================================
     // STEP 7: Verify nullifier derivation (binds leaf key to content)
@@ -218,6 +226,11 @@ fn main(
     let not_after = cert_not_after as u64;
     assert(ts >= not_before, "Certificate not yet valid at proof time");
     assert(ts <= not_after, "Certificate expired at proof time");
+
+    // Return link_commit as public output
+    // NOTE: link_commit is now computed internally and returned as output
+    // The verifier must check that ProofA.link_commit == ProofB.link_commit
+    link_commit
 }
 
 /// Convert 32 bytes to Field (big-endian)
