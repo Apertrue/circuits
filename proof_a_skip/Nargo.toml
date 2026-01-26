@@ -1,0 +1,12 @@
+[package]
+name = "apertrue_proof_a_skip"
+type = "bin"
+authors = ["Apertrue Social"]
+compiler_version = ">=1.0.0"
+description = "ProofA Skip: 2-cert chain verification mode (~80k constraints). For ProofMode/self-signed where leaf is directly signed by root CA."
+
+[dependencies]
+# SHA-256 for hash chain verification
+sha256 = { tag = "v0.2.1", git = "https://github.com/noir-lang/sha256" }
+# Poseidon for commitment schemes
+poseidon = { tag = "v0.1.1", git = "https://github.com/noir-lang/poseidon" }
