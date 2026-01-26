@@ -1,0 +1,11 @@
+[package]
+name = "apertrue_proof_b_es256"
+type = "bin"
+authors = ["Apertrue Social"]
+compiler_version = ">=1.0.0"
+description = "ProofB ES256: ECDSA-only COSE signature verification for algorithm specialization (~100k constraints)"
+
+[dependencies]
+# SHA-256 for hash verification (sig_structure, claim hash)
+sha256 = { tag = "v0.2.1", git = "https://github.com/noir-lang/sha256" }
+# NOTE: noir_rsa and bignum NOT included - this circuit only supports ECDSA
