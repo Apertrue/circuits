@@ -67,9 +67,12 @@ fn main(
     skip_content_hash_binding: u8,
     skip_assertion_hash_verification: u8,
 
-    // === PRIVATE: ECDSA P-384 LEAF KEY (for nullifier binding) ===
-    leaf_pubkey_x: [u8; 48],
-    leaf_pubkey_y: [u8; 48],
+    // === PRIVATE: ECDSA LEAF KEY (for nullifier binding) ===
+    // NOTE: Leaf key is P-256 (32 bytes) even when intermediate is P-384.
+    // The intermediate key type determines cert signature verification,
+    // but COSE signatures use ES256 (P-256) for the leaf key.
+    leaf_pubkey_x: [u8; 32],
+    leaf_pubkey_y: [u8; 32],
 
     // === PRIVATE: ECDSA P-384 CERTIFICATE SIGNATURE & KEY ===
     cert_signature_ecdsa_p384_r: [u8; 48],
@@ -124,10 +127,12 @@ fn main(
     assert(valid, "ECDSA P-384 certificate verification failed");
 
     // ================================================================
-    // STEP 2: Derive Leaf Key Hash (P-384 - 48-byte coordinates)
+    // STEP 2: Derive Leaf Key Hash (P-256 - 32-byte coordinates)
+    // NOTE: Leaf key is P-256 even when intermediate is P-384.
+    // COSE signatures use ES256 (P-256) for the leaf key.
     // ================================================================
-    let x_field = bytes48_to_field(leaf_pubkey_x);
-    let y_field = bytes48_to_field(leaf_pubkey_y);
+    let x_field = bytes_to_field(leaf_pubkey_x);
+    let y_field = bytes_to_field(leaf_pubkey_y);
     let computed_leaf_key_hash = pedersen_hash([x_field, y_field]);
 
     // ================================================================

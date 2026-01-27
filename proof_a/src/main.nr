@@ -35,7 +35,8 @@ fn main(
     proof_timestamp: pub Field,
     cert_not_before: pub Field,
     cert_not_after: pub Field,
-    link_commit: pub Field,
+    // NOTE: link_commit is now COMPUTED internally and returned as OUTPUT
+    // This avoids JS/circuit Pedersen implementation mismatches
 
     // === PUBLIC INPUTS: TIME RANGE BOUNDS (for graduated time disclosure) ===
     // These bounds are public - verifiers can see the range but not exact timestamp
@@ -178,7 +179,7 @@ fn main(
     //
     location_salt: Field,  // Random salt for location commitment
     time_salt: Field       // Random salt for time commitment
-) -> pub (Field, Field, [u8; 32]) {  // Returns (location_commitment, time_commitment, actions_assertion_hash)
+) -> pub (Field, Field, Field, [u8; 32]) {  // Returns (link_commit, location_commitment, time_commitment, actions_assertion_hash)
     // ================================================================
     println(f"Cert Algorithm: {cert_algorithm}");
     // STEP 1: Verify RSA Signature (Root/Intermediate validates Leaf)
@@ -265,14 +266,18 @@ fn main(
     assert(nullifier == expected_nullifier, "Invalid nullifier (leaf key binding failed)");
 
     // ================================================================
-    // STEP 4: Verify Link Commitment
+    // STEP 4: Compute Link Commitment (returned as output)
     // ================================================================
     // This binds this proof to ProofB (which validates intermediate_leaf in Trust List)
     // SECURITY FIX (HIGH-3): Include claim_hash for full ProofA<->ProofB binding
     // This prevents malicious extractor attacks where different claims are used in each proof
+    //
+    // NOTE: link_commit is COMPUTED here and returned as OUTPUT rather than verified
+    // against a pre-computed input. This avoids JS/circuit Pedersen implementation
+    // mismatches between bb.js versions and ACVM's internal Barretenberg.
     let claim_hash_field = bytes_to_field(claim_hash);
-    let expected_link_commit = pedersen_hash([intermediate_leaf, claim_hash_field, link_blind]);
-    assert(link_commit == expected_link_commit, "Link commitment mismatch");
+    let link_commit = pedersen_hash([intermediate_leaf, claim_hash_field, link_blind]);
+    // The verifier checks that ProofA and ProofB output the same link_commit
 
     // ================================================================
     // STEP 4b: Verify Intermediate Leaf Formulation
@@ -598,8 +603,10 @@ fn main(
         2  // input length
     );
 
-    // Return commitments and actions hash as public outputs
-    (location_commitment, time_commitment, actions_assertion_hash)
+    // Return link_commit, commitments, and actions hash as public outputs
+    // NOTE: link_commit is now computed internally and returned as output
+    // The verifier must check that ProofA.link_commit == ProofB.link_commit
+    (link_commit, location_commitment, time_commitment, actions_assertion_hash)
 }
 
 /// Convert 32 bytes to Field (big-endian)
