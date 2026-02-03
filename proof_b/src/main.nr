@@ -40,6 +40,7 @@
 use std::ecdsa_secp256r1::verify_signature;
 use std::hash::pedersen_hash;
 use dep::sha256::sha256_var;
+use dep::poseidon::poseidon2::Poseidon2;
 
 // RSA verification from noir_rsa (zkpassport fork with PSS support)
 use noir_rsa::rsa::verify_sha256_pss;
@@ -78,6 +79,11 @@ fn main(
     cert_not_after: pub Field,
     // NOTE: link_commit is now COMPUTED internally and returned as OUTPUT
     // This avoids JS/circuit Pedersen implementation mismatches
+
+    // === PUBLIC INPUT: Claim Hash Commitment (packed from 32 bytes to 1 Field) ===
+    // This is Poseidon2(claim_hash_as_fields). Must match ProofA's commitment.
+    // SECURITY: Ensures both proofs use the same claim.
+    claim_hash_commitment: pub Field,
 
     // === PRIVATE: ALGORITHM SELECTOR ===
     cose_algorithm: Field,  // 0 = ECDSA (ES256), 1 = RSA (PS256)
@@ -124,6 +130,14 @@ fn main(
 ) -> pub Field {  // Returns link_commit (computed internally)
     // Validate algorithm selector
     assert((cose_algorithm == ALG_ECDSA) | (cose_algorithm == ALG_RSA), "Invalid COSE algorithm");
+
+    // ================================================================
+    // STEP 0: Verify claim hash commitment (PUBLIC INPUT OPTIMIZATION)
+    // ================================================================
+    // Verify that the private claim_hash matches the public claim_hash_commitment.
+    // This ensures both ProofA and ProofB use the same claim.
+    let computed_claim_commitment = Poseidon2::hash(bytes32_to_field_array(claim_hash), 2);
+    assert(computed_claim_commitment == claim_hash_commitment, "Claim hash commitment mismatch");
 
     // ================================================================
     // STEP 1: Verify COSE signature (leaf key signed the C2PA claim)
@@ -264,6 +278,22 @@ fn bytes_to_field(bytes: [u8; 32]) -> Field {
         result = result * 256 + bytes[i] as Field;
     }
     result
+}
+
+/// Convert 32 bytes to 2 Field elements for Poseidon2 hashing
+/// Splits into two 16-byte (128-bit) chunks that fit within the BN254 field
+fn bytes32_to_field_array(bytes: [u8; 32]) -> [Field; 2] {
+    // First 16 bytes -> Field 0
+    let mut f0: Field = 0;
+    for i in 0..16 {
+        f0 = f0 * 256 + bytes[i] as Field;
+    }
+    // Last 16 bytes -> Field 1
+    let mut f1: Field = 0;
+    for i in 16..32 {
+        f1 = f1 * 256 + bytes[i] as Field;
+    }
+    [f0, f1]
 }
 
 /// Compute Merkle root from leaf and proof

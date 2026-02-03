@@ -57,18 +57,25 @@ fn main(
     // === PUBLIC INPUTS: LOCATION PRIVACY CIRCLE (for graduated location disclosure) ===
     center_lat_scaled: pub Field,
     center_lon_scaled: pub Field,
-    center_lat_is_negative: pub u8,
-    center_lon_is_negative: pub u8,
+    location_flags: pub u8,           // bit 0 = lat negative (South), bit 1 = lon negative (West)
     radius_squared_scaled: pub Field,
 
-    // === PUBLIC INPUT: Pre-computed TBS Hash (for certificate chain) ===
-    tbs_hash_bytes: pub [u8; 32],
+    // === PUBLIC INPUT: TBS Hash Commitment (packed from 32 bytes to 1 Field) ===
+    // This is Poseidon2(bytes32_to_field_array(tbs_hash_bytes)). Saves 31 public input fields.
+    tbs_hash_commitment: pub Field,
 
-    // === PUBLIC INPUT: Claim Hash (for hash chain binding) ===
-    claim_hash: pub [u8; 32],
+    // === PUBLIC INPUT: Claim Hash Commitment (packed from 32 bytes to 1 Field) ===
+    // This is Poseidon2(bytes32_to_field_array(claim_hash)). Saves 31 public input fields.
+    claim_hash_commitment: pub Field,
 
     // === PUBLIC INPUT: Content Hash Offset (for content binding) ===
     content_hash_offset: pub u32,
+
+    // === PRIVATE: TBS HASH BYTES (unpacked from commitment) ===
+    tbs_hash_bytes: [u8; 32],
+
+    // === PRIVATE: CLAIM HASH BYTES (unpacked from commitment) ===
+    claim_hash: [u8; 32],
 
     // === PRIVATE: SKIP FLAGS ===
     skip_content_hash_binding: u8,
@@ -117,6 +124,20 @@ fn main(
     location_salt: Field,
     time_salt: Field
 ) -> pub (Field, Field, Field, [u8; 32]) {
+    // ================================================================
+    // STEP 0: Verify commitment packing (PUBLIC INPUT OPTIMIZATION)
+    // ================================================================
+    // This verifies that the private TBS hash bytes and claim hash bytes match
+    // their public Poseidon2 commitments.
+
+    // Verify TBS hash commitment (SHA-256 for ECDSA P-256)
+    let computed_tbs_commitment = Poseidon2::hash(bytes32_to_field_array(tbs_hash_bytes), 2);
+    assert(computed_tbs_commitment == tbs_hash_commitment, "TBS hash commitment mismatch");
+
+    // Verify claim hash commitment
+    let computed_claim_commitment = Poseidon2::hash(bytes32_to_field_array(claim_hash), 2);
+    assert(computed_claim_commitment == claim_hash_commitment, "Claim hash commitment mismatch");
+
     // ================================================================
     // STEP 1: Verify ECDSA P-256 Certificate Signature
     // ================================================================
@@ -187,6 +208,10 @@ fn main(
     // ================================================================
     // STEP 7: Location Range Proof (Graduated Location Disclosure)
     // ================================================================
+    // Unpack location_flags: bit 0 = lat negative, bit 1 = lon negative
+    let center_lat_is_negative = location_flags & 1;
+    let center_lon_is_negative = (location_flags >> 1) & 1;
+
     {
         let lat_same_sign = (exact_lat_is_negative == center_lat_is_negative);
         let d_lat = if lat_same_sign {
@@ -288,6 +313,22 @@ fn bytes_to_field(bytes: [u8; 32]) -> Field {
         result = result * 256 + bytes[i] as Field;
     }
     result
+}
+
+/// Convert 32 bytes to 2 Field elements for Poseidon2 hashing
+/// Splits into two 16-byte (128-bit) chunks that fit within the BN254 field
+fn bytes32_to_field_array(bytes: [u8; 32]) -> [Field; 2] {
+    // First 16 bytes -> Field 0
+    let mut f0: Field = 0;
+    for i in 0..16 {
+        f0 = f0 * 256 + bytes[i] as Field;
+    }
+    // Last 16 bytes -> Field 1
+    let mut f1: Field = 0;
+    for i in 16..32 {
+        f1 = f1 * 256 + bytes[i] as Field;
+    }
+    [f0, f1]
 }
 
 /// Verify content hash exists in claim at offset

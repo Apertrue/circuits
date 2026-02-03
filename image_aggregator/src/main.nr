@@ -14,7 +14,7 @@
 // - Preserves nullifier for replay prevention
 //
 // IMPORTANT: verify_honk_proof requires ALL public inputs+outputs from the inner proof.
-// ProofA has 161 public values, ProofB has 8 public values.
+// ProofA has 50 public values (15 inputs + 35 outputs), ProofB has 9 public values (8 inputs + 1 output).
 //
 // Estimated constraints: ~100k (2x verify_proof + Poseidon hash)
 
@@ -26,10 +26,10 @@ use dep::bb_proof_verification::{
 use dep::poseidon::poseidon2::Poseidon2;
 
 // Number of public values for each proof (inputs + outputs)
-// ProofA: 126 inputs + 35 outputs = 161
-// ProofB: 7 inputs + 1 output = 8
-global PROOF_A_PUBLIC_VALUES: u32 = 161;
-global PROOF_B_PUBLIC_VALUES: u32 = 8;
+// ProofA: 15 inputs + 35 outputs = 50 (after public input packing optimization)
+// ProofB: 8 inputs + 1 output = 9 (added claim_hash_commitment)
+global PROOF_A_PUBLIC_VALUES: u32 = 50;
+global PROOF_B_PUBLIC_VALUES: u32 = 9;
 
 // Main entry point for ImageAggregator
 //
@@ -61,10 +61,10 @@ fn main(
     vk_a_hash: Field,
     vk_b_hash: Field,
 
-    // === PRIVATE INPUTS: ALL PROOF_A PUBLIC VALUES (161 total) ===
+    // === PRIVATE INPUTS: ALL PROOF_A PUBLIC VALUES (50 total) ===
     // These must be passed to verify_honk_proof in exact order
     //
-    // ProofA PUBLIC INPUTS (126 total):
+    // ProofA PUBLIC INPUTS (15 total, after packing optimization):
     // [0] trust_list_root: Field
     // [1] content_hash: Field
     // [2] nullifier: Field
@@ -75,40 +75,39 @@ fn main(
     // [7] time_max: Field
     // [8] center_lat_scaled: Field
     // [9] center_lon_scaled: Field
-    // [10] center_lat_is_negative: Field (u8 as Field)
-    // [11] center_lon_is_negative: Field (u8 as Field)
-    // [12] radius_squared_scaled: Field
-    // [13..45] tbs_hash_bytes: [Field; 32] (u8 as Field)
-    // [45..93] tbs_hash_sha384: [Field; 48] (u8 as Field)
-    // [93..125] claim_hash: [Field; 32] (u8 as Field)
-    // [125] content_hash_offset: Field (u32 as Field)
+    // [10] location_flags: Field (u8 as Field, bit 0=lat neg, bit 1=lon neg)
+    // [11] radius_squared_scaled: Field
+    // [12] tbs_hash_commitment: Field (Poseidon2 of TBS hash bytes)
+    // [13] claim_hash_commitment: Field (Poseidon2 of claim hash bytes)
+    // [14] content_hash_offset: Field (u32 as Field)
     //
     // ProofA PUBLIC OUTPUTS (35 total):
-    // [126] link_commit: Field
-    // [127] location_commitment: Field
-    // [128] time_commitment: Field
-    // [129..161] actions_assertion_hash: [Field; 32] (u8 as Field)
-    proof_a_public_values: [Field; 161],
+    // [15] link_commit: Field
+    // [16] location_commitment: Field
+    // [17] time_commitment: Field
+    // [18..50] actions_assertion_hash: [Field; 32] (u8 as Field)
+    proof_a_public_values: [Field; 50],
 
-    // === PRIVATE INPUTS: ALL PROOF_B PUBLIC VALUES (8 total) ===
+    // === PRIVATE INPUTS: ALL PROOF_B PUBLIC VALUES (9 total) ===
     //
-    // ProofB PUBLIC INPUTS (7 total):
+    // ProofB PUBLIC INPUTS (8 total, after adding claim_hash_commitment):
     // [0] trust_list_root: Field
     // [1] content_hash: Field
     // [2] nullifier: Field
     // [3] proof_timestamp: Field
     // [4] cert_not_before: Field
     // [5] cert_not_after: Field
-    // [6] content_hash_offset: Field (u32 as Field)
+    // [6] claim_hash_commitment: Field (Poseidon2 of claim hash bytes)
+    // [7] content_hash_offset: Field (u32 as Field)
     //
     // ProofB PUBLIC OUTPUT (1 total):
-    // [7] link_commit: Field
-    proof_b_public_values: [Field; 8],
+    // [8] link_commit: Field
+    proof_b_public_values: [Field; 9],
 ) -> pub Field {
     // ================================================================
     // STEP 1: Verify ProofA (certificate chain verification)
     // ================================================================
-    // Pass ALL 161 public values to verify_honk_proof
+    // Pass ALL 50 public values to verify_honk_proof
     verify_honk_proof(
         vk_a,
         proof_a,
@@ -119,7 +118,7 @@ fn main(
     // ================================================================
     // STEP 2: Verify ProofB (COSE signature verification)
     // ================================================================
-    // Pass ALL 8 public values to verify_honk_proof
+    // Pass ALL 9 public values to verify_honk_proof
     verify_honk_proof(
         vk_b,
         proof_b,
@@ -149,6 +148,15 @@ fn main(
         "proof_timestamp mismatch between ProofA and ProofB"
     );
 
+    // SECURITY: Verify claim_hash_commitment matches between proofs
+    // ProofA claim_hash_commitment is at index 13
+    // ProofB claim_hash_commitment is at index 6
+    // This ensures both proofs reference the same signed C2PA claim
+    assert(
+        proof_a_public_values[13] == proof_b_public_values[6],
+        "claim_hash_commitment mismatch between ProofA and ProofB"
+    );
+
     // Also verify these match our own public inputs
     assert(
         proof_a_public_values[0] == trust_list_root,
@@ -173,10 +181,10 @@ fn main(
     // SECURITY: This prevents proof substitution attacks where an attacker
     // could mix ProofA from image A with ProofB from image B.
     //
-    // ProofA link_commit is at index 126 (first output)
-    // ProofB link_commit is at index 7 (only output)
-    let link_commit_a = proof_a_public_values[126];
-    let link_commit_b = proof_b_public_values[7];
+    // ProofA link_commit is at index 15 (first output after 15 inputs)
+    // ProofB link_commit is at index 8 (first output after 8 inputs)
+    let link_commit_a = proof_a_public_values[15];
+    let link_commit_b = proof_b_public_values[8];
 
     assert(
         link_commit_a == link_commit_b,

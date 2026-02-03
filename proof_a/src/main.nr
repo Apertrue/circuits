@@ -49,18 +49,18 @@ fn main(
     // Circuit proves: exact location is within the disclosed circle
     center_lat_scaled: pub Field,     // Circle center latitude (scaled 10^7, absolute value)
     center_lon_scaled: pub Field,     // Circle center longitude (scaled 10^7, absolute value)
-    center_lat_is_negative: pub u8,   // 1 if center latitude is South (negative)
-    center_lon_is_negative: pub u8,   // 1 if center longitude is West (negative)
+    location_flags: pub u8,           // bit 0 = lat negative (South), bit 1 = lon negative (West)
     radius_squared_scaled: pub Field, // Privacy radius squared (scaled units)
 
-    // === NEW PUBLIC INPUT: Pre-computed TBS Hash (for certificate chain) ===
-    tbs_hash_bytes: pub [u8; 32],
-    tbs_hash_sha384: pub [u8; 48],
+    // === PUBLIC INPUT: TBS Hash Commitment (packed from 80 bytes to 1 Field) ===
+    // This is Poseidon2(tbs_hash_bytes_as_fields) or Poseidon2(tbs_hash_sha384_as_fields)
+    // depending on which algorithm is used. Saves 79 public input fields.
+    tbs_hash_commitment: pub Field,
 
-    // === NEW PUBLIC INPUT: Claim Hash (for hash chain binding) ===
-    // This is SHA256(claim_bytes) and must match what ProofB verifies in COSE signature
-    // SECURITY: This is a PUBLIC input so both proofs can verify they're using the same claim
-    claim_hash: pub [u8; 32],
+    // === PUBLIC INPUT: Claim Hash Commitment (packed from 32 bytes to 1 Field) ===
+    // This is Poseidon2(claim_hash_as_fields). The actual claim_hash bytes are private.
+    // SECURITY: Both ProofA and ProofB must use the same commitment.
+    claim_hash_commitment: pub Field,
 
     // === NEW PUBLIC INPUT: Content Hash Offset (for content binding) ===
     // Byte offset where content_hash (as SHA256 digest) appears in claim_bytes
@@ -70,6 +70,15 @@ fn main(
     // === PRIVATE: ALGORITHM SELECTORS ===
     cert_algorithm: Field,  // 0 = ECDSA-P256, 1 = RSA-2048, 2 = RSA-4096, 3 = RSA-2048-SHA384, 4 = ECDSA-P384, 5 = skip verification (2-cert chains)
     leaf_key_type: Field,   // 0 = ECDSA, 1 = RSA
+
+    // === PRIVATE: TBS HASH BYTES (unpacked from commitment) ===
+    // These are the actual hash bytes - the circuit verifies tbs_hash_commitment == Poseidon2(bytes_as_fields)
+    tbs_hash_bytes: [u8; 32],      // SHA-256 hash of TBS certificate (for ECDSA/RSA-SHA256)
+    tbs_hash_sha384: [u8; 48],     // SHA-384 hash of TBS certificate (for RSA-SHA384/ECDSA-P384)
+
+    // === PRIVATE: CLAIM HASH BYTES (unpacked from commitment) ===
+    // These are SHA256(claim_bytes) - the circuit verifies claim_hash_commitment == Poseidon2(bytes_as_fields)
+    claim_hash: [u8; 32],
 
     // === PRIVATE: SKIP FLAGS ===
     // Skip content hash binding verification for C2PA manifests where content hash
@@ -182,6 +191,32 @@ fn main(
 ) -> pub (Field, Field, Field, [u8; 32]) {  // Returns (link_commit, location_commitment, time_commitment, actions_assertion_hash)
     // ================================================================
     println(f"Cert Algorithm: {cert_algorithm}");
+    // STEP 0: Verify commitment packing (PUBLIC INPUT OPTIMIZATION)
+    // ================================================================
+    // This verifies that the private TBS hash bytes and claim hash bytes match
+    // their public Poseidon2 commitments. This allows us to reduce public inputs
+    // from 126 to ~46 fields (63% reduction, cheaper on-chain verification).
+
+    // Verify TBS hash commitment based on algorithm
+    // SHA-256 algorithms (0, 1, 2) use tbs_hash_bytes
+    // SHA-384 algorithms (3, 4) use tbs_hash_sha384
+    let uses_sha384 = (cert_algorithm == 3) | (cert_algorithm == 4);
+
+    if uses_sha384 {
+        // SHA-384: Pack 48 bytes into fields and hash
+        let computed_tbs_commitment = Poseidon2::hash(bytes48_to_field_array(tbs_hash_sha384), 2);
+        assert(computed_tbs_commitment == tbs_hash_commitment, "TBS hash commitment mismatch (SHA-384)");
+    } else if cert_algorithm != 5 {
+        // SHA-256: Pack 32 bytes into fields and hash
+        let computed_tbs_commitment = Poseidon2::hash(bytes32_to_field_array(tbs_hash_bytes), 2);
+        assert(computed_tbs_commitment == tbs_hash_commitment, "TBS hash commitment mismatch (SHA-256)");
+    }
+    // Note: cert_algorithm == 5 (2-cert chain) skips TBS commitment check since no cert signature verification
+
+    // Verify claim hash commitment
+    let computed_claim_commitment = Poseidon2::hash(bytes32_to_field_array(claim_hash), 2);
+    assert(computed_claim_commitment == claim_hash_commitment, "Claim hash commitment mismatch");
+
     // STEP 1: Verify RSA Signature (Root/Intermediate validates Leaf)
     // ================================================================
 
@@ -400,6 +435,10 @@ fn main(
     // SECURITY FIX (MEDIUM-1): Previously radius=0 bypassed all checks.
     // Now we ALWAYS verify location. For radius=0 (exact disclosure), we verify
     // center == exact coordinates. For radius>0, we verify distance <= radius.
+
+    // Unpack location_flags: bit 0 = lat negative, bit 1 = lon negative
+    let center_lat_is_negative = location_flags & 1;
+    let center_lon_is_negative = (location_flags >> 1) & 1;
 
     {
         // Calculate latitude difference (accounting for hemisphere)
@@ -625,6 +664,38 @@ fn bytes48_to_field(bytes: [u8; 48]) -> Field {
         result = result * 256 + bytes[i] as Field;
     }
     result
+}
+
+/// Convert 32 bytes to 2 Field elements for Poseidon2 hashing
+/// Splits into two 16-byte (128-bit) chunks that fit within the BN254 field
+fn bytes32_to_field_array(bytes: [u8; 32]) -> [Field; 2] {
+    // First 16 bytes -> Field 0
+    let mut f0: Field = 0;
+    for i in 0..16 {
+        f0 = f0 * 256 + bytes[i] as Field;
+    }
+    // Last 16 bytes -> Field 1
+    let mut f1: Field = 0;
+    for i in 16..32 {
+        f1 = f1 * 256 + bytes[i] as Field;
+    }
+    [f0, f1]
+}
+
+/// Convert 48 bytes to 2 Field elements for Poseidon2 hashing
+/// Splits into two 24-byte (192-bit) chunks that fit within the BN254 field
+fn bytes48_to_field_array(bytes: [u8; 48]) -> [Field; 2] {
+    // First 24 bytes -> Field 0
+    let mut f0: Field = 0;
+    for i in 0..24 {
+        f0 = f0 * 256 + bytes[i] as Field;
+    }
+    // Last 24 bytes -> Field 1
+    let mut f1: Field = 0;
+    for i in 24..48 {
+        f1 = f1 * 256 + bytes[i] as Field;
+    }
+    [f0, f1]
 }
 
 /// SECURITY FIX (HIGH-1): Verify content_hash exists in claim

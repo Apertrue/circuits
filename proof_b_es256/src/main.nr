@@ -30,6 +30,7 @@
 use std::ecdsa_secp256r1::verify_signature;
 use std::hash::pedersen_hash;
 use dep::sha256::sha256_var;
+use dep::poseidon::poseidon2::Poseidon2;
 
 /// Maximum depth of the Merkle tree for promoted intermediates
 global MERKLE_TREE_DEPTH: u32 = 8;
@@ -51,6 +52,10 @@ fn main(
     proof_timestamp: pub Field,
     cert_not_before: pub Field,
     cert_not_after: pub Field,
+
+    // === PUBLIC INPUT: Claim Hash Commitment (packed from 32 bytes to 1 Field) ===
+    // This is Poseidon2(bytes32_to_field_array(claim_hash)). Must match ProofA.
+    claim_hash_commitment: pub Field,
     // NOTE: link_commit is now COMPUTED internally and returned as OUTPUT
 
     // === PRIVATE: ECDSA COSE SIGNATURE ===
@@ -84,6 +89,12 @@ fn main(
     // This binds the public content_hash to the signed claim, preventing substitution attacks
     content_hash_offset: pub u32
 ) -> pub Field {  // Returns link_commit (computed internally)
+    // ================================================================
+    // STEP 0: Verify claim hash commitment (PUBLIC INPUT OPTIMIZATION)
+    // ================================================================
+    let computed_claim_commitment = Poseidon2::hash(bytes32_to_field_array(claim_hash), 2);
+    assert(computed_claim_commitment == claim_hash_commitment, "Claim hash commitment mismatch");
+
     // ================================================================
     // STEP 1: Verify ECDSA COSE signature (ES256)
     // ================================================================
@@ -179,6 +190,19 @@ fn bytes_to_field(bytes: [u8; 32]) -> Field {
         result = result * 256 + bytes[i] as Field;
     }
     result
+}
+
+/// Convert 32 bytes to 2 Field elements for Poseidon2 hashing
+fn bytes32_to_field_array(bytes: [u8; 32]) -> [Field; 2] {
+    let mut f0: Field = 0;
+    for i in 0..16 {
+        f0 = f0 * 256 + bytes[i] as Field;
+    }
+    let mut f1: Field = 0;
+    for i in 16..32 {
+        f1 = f1 * 256 + bytes[i] as Field;
+    }
+    [f0, f1]
 }
 
 /// Compute Merkle root from leaf and proof
