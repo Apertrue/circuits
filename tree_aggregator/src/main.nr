@@ -20,8 +20,8 @@
 //
 // IMPORTANT: At level 0, we verify ImageAggregator proofs which have 5 public values:
 // [trust_list_root, content_hash, nullifier, proof_timestamp, image_commitment]
-// At level 1+, we verify TreeAggregator proofs which have 1 public value:
-// [combined_commitment]
+// At level 1+, we verify TreeAggregator proofs which also have 5 public values:
+// [0, 0, 0, 0, combined_commitment]  (padded to match ImageAggregator layout)
 //
 // At each level, TreeAggregator:
 // 1. Verifies left child proof
@@ -42,23 +42,33 @@ global IMAGE_AGG_PUBLIC_VALUES: u32 = 5;
 
 // Main entry point for TreeAggregator
 //
-// PUBLIC INPUTS:
-// - combined_commitment: The expected Poseidon2([commitment_left, commitment_right])
-//   This is public so verifiers can check the tree structure.
+// PUBLIC INPUTS (4 padding fields, forced to zero):
+// - pad_0..pad_3: Must be zero. These exist so TreeAggregator has 5 public
+//   values (4 inputs + 1 return) matching ImageAggregator's layout. This
+//   ensures verify_honk_proof works identically at every tree level.
 //
 // PRIVATE INPUTS:
+// - combined_commitment: The expected Poseidon2([commitment_left, commitment_right])
+//   Made private to keep it at index 4 of public values (as the return value).
 // - proof_left: Left child proof (ImageProof or previous TreeProof)
 // - proof_right: Right child proof (ImageProof or previous TreeProof)
 // - vk: Verification key (same for both - they're from the same circuit type)
 // - vk_hash: Hash of the VK for recursive verification
-// - public_values_left: All public values from left child proof (5 for ImageAggregator)
-// - public_values_right: All public values from right child proof (5 for ImageAggregator)
+// - public_values_left: All public values from left child proof (5 values)
+// - public_values_right: All public values from right child proof (5 values)
 //
 // PUBLIC OUTPUT:
-// - Returns the combined_commitment (passed through for chaining)
+// - Returns the combined_commitment at index 4
+//   Public values layout: [0, 0, 0, 0, combined_commitment]
 fn main(
-    // === PUBLIC INPUTS ===
-    combined_commitment: pub Field,
+    // === PUBLIC INPUTS (padding - must be zero) ===
+    pad_0: pub Field,
+    pad_1: pub Field,
+    pad_2: pub Field,
+    pad_3: pub Field,
+
+    // === PRIVATE INPUTS ===
+    combined_commitment: Field,
 
     // === PRIVATE INPUTS: PROOFS ===
     proof_left: UltraHonkZKProof,
@@ -78,10 +88,18 @@ fn main(
     // [3] proof_timestamp
     // [4] image_commitment (the output we care about)
     //
-    // For TreeAggregator proofs (level 1+): Pad with zeros, only [4] matters
+    // For TreeAggregator proofs (level 1+): [0, 0, 0, 0, combined_commitment]
     public_values_left: [Field; 5],
     public_values_right: [Field; 5],
 ) -> pub Field {
+    // ================================================================
+    // STEP 0: Enforce padding fields are zero
+    // ================================================================
+    assert(pad_0 == 0, "pad_0 must be zero");
+    assert(pad_1 == 0, "pad_1 must be zero");
+    assert(pad_2 == 0, "pad_2 must be zero");
+    assert(pad_3 == 0, "pad_3 must be zero");
+
     // ================================================================
     // STEP 1: Verify left child proof
     // ================================================================
