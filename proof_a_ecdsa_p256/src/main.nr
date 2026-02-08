@@ -209,6 +209,8 @@ fn main(
     // STEP 7: Location Range Proof (Graduated Location Disclosure)
     // ================================================================
     // Unpack location_flags: bit 0 = lat negative, bit 1 = lon negative
+    // Reject if unused high bits (2-7) are set - prevents flag stuffing
+    assert(location_flags <= 3, "location_flags has invalid high bits set (must be 0-3)");
     let center_lat_is_negative = location_flags & 1;
     let center_lon_is_negative = (location_flags >> 1) & 1;
 
@@ -235,6 +237,11 @@ fn main(
             exact_lon_scaled + center_lon_scaled
         };
 
+        // NOTE: Euclidean distance in coordinate space. At high latitudes,
+        // 1 deg lon < 1 deg lat in real-world distance, so this circle is elliptical.
+        // The client-side radius computation (metersToScaledRadius) compensates
+        // by using the longitude conversion at the user's latitude, ensuring the
+        // privacy circle covers at least the requested radius in ALL directions.
         let distance_squared = d_lat * d_lat + d_lon * d_lon;
 
         assert(

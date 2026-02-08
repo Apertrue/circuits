@@ -74,11 +74,13 @@ fn main(
     proof_left: UltraHonkZKProof,
     proof_right: UltraHonkZKProof,
 
-    // === PRIVATE INPUTS: VERIFICATION KEY ===
-    // Note: Same VK for both proofs since they're from the same circuit
-    // (either both ImageAggregator proofs or both TreeAggregator proofs)
-    vk: UltraHonkVerificationKey,
-    vk_hash: Field,
+    // === PRIVATE INPUTS: VERIFICATION KEYS ===
+    // Separate VKs for left/right: when an odd image count causes promotion,
+    // a promoted ImageAggregator proof may be paired with a TreeAggregator proof.
+    vk_left: UltraHonkVerificationKey,
+    vk_right: UltraHonkVerificationKey,
+    vk_hash_left: Field,
+    vk_hash_right: Field,
 
     // === PRIVATE INPUTS: ALL PUBLIC VALUES FROM CHILD PROOFS ===
     // For ImageAggregator proofs (level 0): 5 values each
@@ -105,10 +107,10 @@ fn main(
     // ================================================================
     // Pass ALL public values to verify_honk_proof
     verify_honk_proof(
-        vk,
+        vk_left,
         proof_left,
         public_values_left,
-        vk_hash,
+        vk_hash_left,
     );
 
     // ================================================================
@@ -116,10 +118,10 @@ fn main(
     // ================================================================
     // Pass ALL public values to verify_honk_proof
     verify_honk_proof(
-        vk,
+        vk_right,
         proof_right,
         public_values_right,
-        vk_hash,
+        vk_hash_right,
     );
 
     // ================================================================

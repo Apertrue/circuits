@@ -190,7 +190,6 @@ fn main(
     time_salt: Field       // Random salt for time commitment
 ) -> pub (Field, Field, Field, [u8; 32]) {  // Returns (link_commit, location_commitment, time_commitment, actions_assertion_hash)
     // ================================================================
-    println(f"Cert Algorithm: {cert_algorithm}");
     // STEP 0: Verify commitment packing (PUBLIC INPUT OPTIMIZATION)
     // ================================================================
     // This verifies that the private TBS hash bytes and claim hash bytes match
@@ -265,7 +264,7 @@ fn main(
         // In 2-cert chains, the leaf is signed directly by the root CA.
         // The trust list membership is verified via Merkle proof using issuer DN hash.
         // No intermediate certificate signature to verify.
-        println(f"2-cert chain mode: skipping certificate signature verification");
+        // 2-cert chain mode: skipping certificate signature verification
     } else {
         assert(false, f"Invalid certificate algorithm: {cert_algorithm}");
     }
@@ -437,6 +436,7 @@ fn main(
     // center == exact coordinates. For radius>0, we verify distance <= radius.
 
     // Unpack location_flags: bit 0 = lat negative, bit 1 = lon negative
+    assert(location_flags <= 3, "location_flags has invalid high bits set (must be 0-3)");
     let center_lat_is_negative = location_flags & 1;
     let center_lon_is_negative = (location_flags >> 1) & 1;
 
@@ -530,7 +530,7 @@ fn main(
     if skip_content_hash_binding == 0 {
         verify_content_hash_binding(claim_bytes, content_hash_offset, content_hash);
     } else {
-        println(f"Skipping content hash binding verification (skip_content_hash_binding=1)");
+        // Content hash binding verification skipped (skip_content_hash_binding=1)
     }
 
     // ================================================================
@@ -552,7 +552,7 @@ fn main(
             exif_assertion_length
         );
     } else {
-        println(f"Skipping assertion hash verification (skip_assertion_hash_verification=1)");
+        // Assertion hash verification skipped (skip_assertion_hash_verification=1)
     }
 
     // At this point, we've proven that exif_assertion_bytes are authentic

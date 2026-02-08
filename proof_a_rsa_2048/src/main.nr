@@ -213,6 +213,7 @@ fn main(
     // STEP 7: Location Range Proof
     // ================================================================
     // Unpack location_flags: bit 0 = lat negative, bit 1 = lon negative
+    assert(location_flags <= 3, "location_flags has invalid high bits set (must be 0-3)");
     let center_lat_is_negative = location_flags & 1;
     let center_lon_is_negative = (location_flags >> 1) & 1;
 

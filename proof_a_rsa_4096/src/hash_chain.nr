@@ -185,26 +185,31 @@ pub fn extract_timestamp_from_cbor(
         // Inline value
         timestamp = additional_info as u64;
     } else if additional_info == 24 {
-        // u8 follows
+        // u8 follows - need 2 bytes total
+        assert(timestamp_offset + 2 <= MAX_EXIF_ASSERTION_SIZE as u32, "CBOR u8 timestamp exceeds buffer");
         timestamp = assertion_bytes[timestamp_offset + 1] as u64;
     } else if additional_info == 25 {
-        // u16 follows (big-endian)
+        // u16 follows (big-endian) - need 3 bytes total
+        assert(timestamp_offset + 3 <= MAX_EXIF_ASSERTION_SIZE as u32, "CBOR u16 timestamp exceeds buffer");
         timestamp = (assertion_bytes[timestamp_offset + 1] as u64) << 8;
         timestamp = timestamp + (assertion_bytes[timestamp_offset + 2] as u64);
     } else if additional_info == 26 {
-        // u32 follows (big-endian)
+        // u32 follows (big-endian) - need 5 bytes total
+        assert(timestamp_offset + 5 <= MAX_EXIF_ASSERTION_SIZE as u32, "CBOR u32 timestamp exceeds buffer");
         timestamp = (assertion_bytes[timestamp_offset + 1] as u64) << 24;
         timestamp = timestamp + ((assertion_bytes[timestamp_offset + 2] as u64) << 16);
         timestamp = timestamp + ((assertion_bytes[timestamp_offset + 3] as u64) << 8);
         timestamp = timestamp + (assertion_bytes[timestamp_offset + 4] as u64);
     } else if additional_info == 27 {
-        // u64 follows (big-endian)
+        // u64 follows (big-endian) - need 9 bytes total
+        assert(timestamp_offset + 9 <= MAX_EXIF_ASSERTION_SIZE as u32, "CBOR u64 timestamp exceeds buffer");
         for i in 0..8 {
             timestamp = timestamp << 8;
             timestamp = timestamp + (assertion_bytes[timestamp_offset + 1 + i] as u64);
         }
     } else {
-        assert(false, "Unsupported CBOR integer encoding for timestamp");
+        // additional_info 28-30 are reserved per CBOR RFC 8949, 31 is indefinite-length
+        assert(false, "Reserved or unsupported CBOR integer encoding for timestamp");
     }
 
     timestamp
