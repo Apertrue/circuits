@@ -136,6 +136,20 @@ pub contract ApertrueVerifier {
         owner: AztecAddress,
     ) {
         // ============================================================
+        // INPUT VALIDATION
+        // ============================================================
+        assert(image_count as u64 > 0, "image_count must be > 0");
+        assert(trust_list_root != 0, "trust_list_root must not be zero");
+        assert(!owner.is_zero(), "owner must not be zero address");
+
+        // Verify tree aggregator padding: public_values[0..4] must be zero
+        assert(public_values[0] == 0, "public_values padding [0] must be zero");
+        assert(public_values[1] == 0, "public_values padding [1] must be zero");
+        assert(public_values[2] == 0, "public_values padding [2] must be zero");
+        assert(public_values[3] == 0, "public_values padding [3] must be zero");
+        assert(public_values[4] != 0, "root_commitment must not be zero");
+
+        // ============================================================
         // STEP 1: Cryptographically verify the tree aggregator proof
         // This is the trustless core -- no backend involvement
         // ============================================================
@@ -190,6 +204,8 @@ pub contract ApertrueVerifier {
         // Verify VK hash matches stored value (must happen in public context)
         let stored_vk_hash = self.storage.vk_hash.read();
         assert(vk_hash == stored_vk_hash, "VK hash mismatch");
+
+        assert(image_count as u64 > 0, "image_count must be > 0");
 
         let current_verifications = self.storage.total_verifications.read();
         self.storage.total_verifications.write(current_verifications + 1);
