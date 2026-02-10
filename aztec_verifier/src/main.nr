@@ -4,15 +4,14 @@
 // creating encrypted notes only the user can read.
 //
 // Architecture:
-// - Browser submits tree aggregator proof directly to Aztec (via PXE sidecar)
+// - Browser submits tree aggregator proof directly to Aztec (via PXE)
 // - Private function calls verify_honk_proof (trustless, ~250k gates)
 // - Creates VerifiedMediaNote in user's private storage
-// - Enqueues public counter increment + VK hash check (the ONLY public state)
+// - VK hash checked in private via PublicImmutable historical read
 // - Backend is NEVER in the on-chain verification path
 //
 // Privacy guarantees:
 // - No on-chain link between user address and verification data
-// - Only aggregate counters are public
 // - Notes are encrypted to user's key; only they can read them
 // - Nullifier derived from root_commitment prevents replay
 // - Diversified addresses prevent cross-batch correlation
@@ -23,17 +22,18 @@ use dep::aztec::macros::aztec;
 pub contract ApertrueVerifier {
     use dep::aztec::{
         macros::{
-            functions::{external, initializer, only_self, view},
+            functions::{external, initializer, view},
             notes::note,
             storage::storage,
         },
         messages::message_delivery::MessageDelivery,
+        oracle::notes::set_sender_for_tags,
         protocol_types::{
             address::AztecAddress,
             hash::poseidon2_hash,
             traits::{Deserialize, Packable, Serialize, ToField},
         },
-        state_vars::{Owned, PrivateSet, PublicMutable},
+        state_vars::{Owned, PrivateSet, PublicImmutable},
     };
 
     use dep::bb_proof_verification::{
@@ -72,16 +72,13 @@ pub contract ApertrueVerifier {
 
     #[storage]
     struct Storage<Context> {
-        // Admin address (can update VK hash)
-        admin: PublicMutable<AztecAddress, Context>,
+        // Admin address (set at deployment)
+        admin: PublicImmutable<AztecAddress, Context>,
         // Tree aggregator verification key hash
-        // The full VK is passed as private input; public call asserts hash(vk) == this
-        vk_hash: PublicMutable<Field, Context>,
+        // Set once at deployment; readable from private via historical read
+        vk_hash: PublicImmutable<Field, Context>,
         // Private notes per owner (Owned wraps PrivateSet for owner-keyed access)
         verified_notes: Owned<PrivateSet<VerifiedMediaNote, Context>, Context>,
-        // Public counters (the ONLY public state visible on-chain)
-        total_verifications: PublicMutable<Field, Context>,
-        total_images_verified: PublicMutable<Field, Context>,
     }
 
     // ================================================================
@@ -92,10 +89,8 @@ pub contract ApertrueVerifier {
     #[external("public")]
     #[initializer]
     fn constructor(admin: AztecAddress, initial_vk_hash: Field) {
-        self.storage.admin.write(admin);
-        self.storage.vk_hash.write(initial_vk_hash);
-        self.storage.total_verifications.write(0);
-        self.storage.total_images_verified.write(0);
+        self.storage.admin.initialize(admin);
+        self.storage.vk_hash.initialize(initial_vk_hash);
     }
 
     // ================================================================
@@ -108,13 +103,13 @@ pub contract ApertrueVerifier {
     // aggregated ZK proof inside the private function, then stores
     // the result as an encrypted note only the caller can read.
     //
-    // The VK hash check happens in the enqueued public call because
-    // PublicMutable cannot be read from private context.
+    // VK hash is checked in private context via PublicImmutable
+    // historical read (no public call needed).
     //
     // Arguments:
     //   proof             - 508-field UltraHonkZK proof from tree aggregator
     //   vk                - 115-field verification key for tree aggregator circuit
-    //   vk_hash           - Hash of VK (checked against stored hash in public call)
+    //   vk_hash           - Hash of VK (checked against stored immutable hash)
     //   public_values     - 5 public values from tree aggregator:
     //                        [0, 0, 0, 0, root_commitment]
     //   image_count       - Number of images in the batch
@@ -123,7 +118,6 @@ pub contract ApertrueVerifier {
     //   owner             - Note owner (caller's diversified address)
     //
     // Gate cost: ~250k for verify_honk_proof + ~30k for app logic
-    // Proving time: ~8-15 seconds on desktop (client-side via PXE)
     #[external("private")]
     fn verify_and_store(
         proof: UltraHonkZKProof,
@@ -150,6 +144,12 @@ pub contract ApertrueVerifier {
         assert(public_values[4] != 0, "root_commitment must not be zero");
 
         // ============================================================
+        // VK HASH CHECK (private historical read of PublicImmutable)
+        // ============================================================
+        let stored_vk_hash = self.storage.vk_hash.read();
+        assert(vk_hash == stored_vk_hash, "VK hash mismatch");
+
+        // ============================================================
         // STEP 1: Cryptographically verify the tree aggregator proof
         // This is the trustless core -- no backend involvement
         // ============================================================
@@ -172,6 +172,13 @@ pub contract ApertrueVerifier {
         // STEP 3: Create encrypted note only the owner can read
         // Owner/randomness handled by framework via Owned storage slot
         // ============================================================
+
+        // Set the sender for note tags so the owner's PXE can discover
+        // notes without needing this contract registered as a sender.
+        // Required when TX does not go through an account entrypoint
+        // (verify_and_store is proof-authorized, not account-authorized).
+        unsafe { set_sender_for_tags(owner) };
+
         let note = VerifiedMediaNote {
             root_commitment,
             image_count,
@@ -179,79 +186,18 @@ pub contract ApertrueVerifier {
             epoch_week,
         };
 
-        // Insert note into owner's private set; deliver note message
+        // Insert note into owner's private set; deliver via offchain oracle.
+        // UNCONSTRAINED_OFFCHAIN avoids tail_to_public kernel (which requires
+        // fee payment setup via account entrypoint). Notes are still encrypted
+        // to the owner and discoverable by their PXE.
         self.storage.verified_notes.at(owner).insert(note).deliver(
-            MessageDelivery.CONSTRAINED_ONCHAIN,
+            MessageDelivery.UNCONSTRAINED_OFFCHAIN,
         );
-
-        // ============================================================
-        // STEP 4: Enqueue public VK hash check + counter increment
-        // VK hash must be verified in public context (PublicMutable.read)
-        // This is the ONLY on-chain side effect visible to observers
-        // ============================================================
-        self.enqueue_self._increment_counters(image_count, vk_hash);
-    }
-
-    // ================================================================
-    // PUBLIC FUNCTIONS (called from private via enqueue_self)
-    // ================================================================
-
-    // Increment platform-wide counters and verify VK hash
-    // Only callable by this contract itself (via enqueue_self from private)
-    #[external("public")]
-    #[only_self]
-    fn _increment_counters(image_count: Field, vk_hash: Field) {
-        // Verify VK hash matches stored value (must happen in public context)
-        let stored_vk_hash = self.storage.vk_hash.read();
-        assert(vk_hash == stored_vk_hash, "VK hash mismatch");
-
-        assert(image_count as u64 > 0, "image_count must be > 0");
-
-        let current_verifications = self.storage.total_verifications.read();
-        self.storage.total_verifications.write(current_verifications + 1);
-
-        let current_images = self.storage.total_images_verified.read();
-        self.storage.total_images_verified.write(current_images + image_count);
-    }
-
-    // ================================================================
-    // ADMIN FUNCTIONS
-    // ================================================================
-
-    // Update the tree aggregator VK hash
-    // Only callable by admin (when circuits are recompiled)
-    #[external("public")]
-    fn update_vk_hash(new_vk_hash: Field) {
-        let admin = self.storage.admin.read();
-        assert(self.msg_sender().unwrap() == admin, "Only admin");
-        self.storage.vk_hash.write(new_vk_hash);
-    }
-
-    // Transfer admin to a new address
-    #[external("public")]
-    fn transfer_admin(new_admin: AztecAddress) {
-        let current_admin = self.storage.admin.read();
-        assert(self.msg_sender().unwrap() == current_admin, "Only admin");
-        self.storage.admin.write(new_admin);
     }
 
     // ================================================================
     // VIEW FUNCTIONS (public, read-only)
     // ================================================================
-
-    // Get total number of verifications (public counter)
-    #[external("public")]
-    #[view]
-    fn get_total_verifications() -> Field {
-        self.storage.total_verifications.read()
-    }
-
-    // Get total number of images verified (public counter)
-    #[external("public")]
-    #[view]
-    fn get_total_images() -> Field {
-        self.storage.total_images_verified.read()
-    }
 
     // Get the stored VK hash
     #[external("public")]

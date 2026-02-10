@@ -90,24 +90,18 @@ export class ApertrueVerifierContract extends ContractBase {
   }
   
 
-  public static get storage(): ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'total_verifications' | 'total_images_verified'> {
+  public static get storage(): ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes'> {
       return {
         admin: {
       slot: new Fr(1n),
     },
 vk_hash: {
-      slot: new Fr(2n),
-    },
-verified_notes: {
       slot: new Fr(3n),
     },
-total_verifications: {
-      slot: new Fr(4n),
-    },
-total_images_verified: {
+verified_notes: {
       slot: new Fr(5n),
     }
-      } as ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'total_verifications' | 'total_images_verified'>;
+      } as ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes'>;
     }
     
 
@@ -120,12 +114,6 @@ total_images_verified: {
     /** get_admin() */
     get_admin: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** get_total_images() */
-    get_total_images: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** get_total_verifications() */
-    get_total_verifications: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
     /** get_vk_hash() */
     get_vk_hash: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
@@ -137,12 +125,6 @@ total_images_verified: {
 
     /** sync_private_state() */
     sync_private_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** transfer_admin(new_admin: struct) */
-    transfer_admin: ((new_admin: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** update_vk_hash(new_vk_hash: field) */
-    update_vk_hash: ((new_vk_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** verify_and_store(proof: array, vk: array, vk_hash: field, public_values: array, image_count: field, trust_list_root: field, epoch_week: field, owner: struct) */
     verify_and_store: ((proof: FieldLike[], vk: FieldLike[], vk_hash: FieldLike, public_values: FieldLike[], image_count: FieldLike, trust_list_root: FieldLike, epoch_week: FieldLike, owner: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
