@@ -183,6 +183,10 @@ pub contract WebAuthnAccount {
     // Authorize a session key on-chain.
     // This TX goes through the account entrypoint (requires biometric).
     // After this, subsequent TXs can use the session key path (no biometric).
+    //
+    // Auto-revokes ALL existing session key notes before inserting the new
+    // one. This prevents orphaned notes accumulating when the browser page
+    // is refreshed (in-memory key lost but on-chain note persists).
     #[external("private")]
     fn authorize_session_key(
         pubkey_x: Field,
@@ -194,6 +198,17 @@ pub contract WebAuthnAccount {
         unsafe { set_sender_for_tags(self.address) };
 
         let owner = self.context.this_address();
+
+        // Revoke all existing session key notes (prevents orphan accumulation)
+        let mut options = dep::aztec::note::note_getter_options::NoteGetterOptions::new();
+        options = options.set_limit(MAX_SESSION_KEYS);
+        let existing = self.storage.session_keys.at(owner).get_notes(options);
+        for i in 0..MAX_SESSION_KEYS {
+            if i < existing.len() {
+                self.storage.session_keys.at(owner).remove(existing.get(i));
+            }
+        }
+
         let note = SessionKeyNote { pubkey_x, pubkey_y, expiry, scope };
         self.storage.session_keys.at(owner).insert(note).deliver(
             MessageDelivery.CONSTRAINED_ONCHAIN,
