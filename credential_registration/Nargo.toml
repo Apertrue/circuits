@@ -1,0 +1,10 @@
+[package]
+name = "credential_registration"
+type = "bin"
+authors = ["Apertrue"]
+compiler_version = ">=1.0.0"
+description = "Proof-of-knowledge: proves knowledge of BJJ secret behind Poseidon commitment"
+
+[dependencies]
+ec = { tag = "v0.2.5", git = "https://github.com/noir-lang/noir-edwards" }
+poseidon = { tag = "v0.1.1", git = "https://github.com/noir-lang/poseidon" }

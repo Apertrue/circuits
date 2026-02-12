@@ -1,0 +1,11 @@
+[package]
+name = "anonymous_credential"
+type = "bin"
+authors = ["Apertrue"]
+compiler_version = ">=1.0.0"
+description = "Semaphore-style anonymous credential: BJJ identity + Poseidon Merkle tree + nullifier rate limiting"
+
+[dependencies]
+ec = { tag = "v0.2.5", git = "https://github.com/noir-lang/noir-edwards" }
+binary_merkle_root = { tag = "binary-merkle-root-v0.0.1", git = "https://github.com/privacy-scaling-explorations/zk-kit.noir", directory = "packages/binary-merkle-root" }
+poseidon = { tag = "v0.1.1", git = "https://github.com/noir-lang/poseidon" }
