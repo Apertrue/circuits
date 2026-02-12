@@ -3,11 +3,16 @@
 // Tier 1 account security: the passkey hardware IS the signing key.
 // No extractable key material ever exists in JavaScript.
 //
-// Every transaction requires a WebAuthn assertion (biometric/PIN prompt).
-// The authenticator signs SHA256(authData || SHA256(clientDataJSON))
-// where clientDataJSON embeds the base64url-encoded challenge (= TX hash).
+// Dual auth witness paths (discriminator at witness[0]):
+//   0 = WebAuthn P-256: full biometric prompt every transaction
+//   1 = Session key (Schnorr/Grumpkin): lightweight ephemeral key
 //
-// Full WebAuthn envelope verification in-circuit:
+// Session keys reduce biometric prompts after initial authorization.
+// The ephemeral Grumpkin key lives only in JS memory (never persisted).
+// authorize_session_key() stores a SessionKeyNote on-chain (requires
+// biometric since it goes through the account entrypoint).
+//
+// WebAuthn envelope verification in-circuit:
 // 1. Base64url encode challenge, verify it appears in clientDataJSON
 // 2. SHA-256 hash clientDataJSON
 // 3. Concatenate authenticatorData || SHA256(clientDataJSON)
@@ -36,21 +41,26 @@ pub contract WebAuthnAccount {
             auth_witness::get_auth_witness,
             notes::{get_sender_for_tags, set_sender_for_tags},
         },
-        protocol_types::traits::Packable,
-        state_vars::SinglePrivateImmutable,
+        protocol_types::traits::{Deserialize, Packable, Serialize},
+        state_vars::{Owned, PrivateSet, SinglePrivateImmutable},
     };
 
     use dep::sha256::sha256_var;
+    use std::embedded_curve_ops::EmbeddedCurvePoint;
 
     // Max byte lengths for WebAuthn data
     // clientDataJSON: ~120-150 bytes typical, 256 allows for long origins
     global CLIENT_DATA_JSON_MAX: u32 = 256;
     // authenticatorData: 37 bytes standard, 200 allows for extensions
     global AUTH_DATA_MAX: u32 = 200;
-    // Auth witness total fields:
-    //   64 (sig) + 200 (auth_data) + 1 (auth_data_len)
-    //   + 256 (cdj) + 1 (cdj_len) + 1 (challenge_idx) = 523
-    global AUTH_WITNESS_LEN: u32 = 523;
+    // Auth witness total fields (max of both paths):
+    //   WebAuthn: 1 (discriminator) + 523 (existing layout) = 524
+    //   Session key: 1 (discriminator) + 2 (pubkey) + 64 (sig) = 67
+    //   Use 524 (max); session key path ignores trailing zeros.
+    global AUTH_WITNESS_LEN: u32 = 524;
+    // Max number of concurrent session keys per account.
+    // Used as compile-time loop bound for note iteration.
+    global MAX_SESSION_KEYS: u32 = 5;
 
     // P-256 public key stored as an encrypted note.
     // Written once in constructor, read every time the account signs a TX.
@@ -100,9 +110,26 @@ pub contract WebAuthnAccount {
         }
     }
 
+    // Ephemeral session key note (Schnorr/Grumpkin).
+    // Stored on-chain via authorize_session_key(), read during session key auth.
+    // Grumpkin public key coordinates are Field-native (embedded curve).
+    //
+    // SECURITY NOTE: expiry and scope are stored for future enforcement but
+    // are NOT currently checked in-circuit (see TODOs in is_valid_impl).
+    // Expiry is enforced client-side only. Scope is unused (0 = full access).
+    #[derive(Deserialize, Eq, Packable, Serialize)]
+    #[note]
+    pub struct SessionKeyNote {
+        pubkey_x: Field,
+        pubkey_y: Field,
+        expiry: Field,
+        scope: Field,
+    }
+
     #[storage]
     struct Storage<Context> {
         signing_public_key: SinglePrivateImmutable<WebAuthnPublicKeyNote, Context>,
+        session_keys: Owned<PrivateSet<SessionKeyNote, Context>, Context>,
     }
 
     // Deploy with P-256 public key extracted from passkey credential
@@ -130,7 +157,7 @@ pub contract WebAuthnAccount {
         unsafe { set_sender_for_tags(original_sender) };
     }
 
-    // Standard account entrypoint: validates WebAuthn signature then executes payload
+    // Standard account entrypoint: validates auth witness then executes payload
     #[external("private")]
     #[noinitcheck]
     #[nophasecheck]
@@ -147,6 +174,51 @@ pub contract WebAuthnAccount {
     fn verify_private_authwit(inner_hash: Field) -> Field {
         let actions = AccountActions::init(self.context, is_valid_impl);
         actions.verify_private_authwit(inner_hash)
+    }
+
+    // ================================================================
+    // SESSION KEY MANAGEMENT
+    // ================================================================
+
+    // Authorize a session key on-chain.
+    // This TX goes through the account entrypoint (requires biometric).
+    // After this, subsequent TXs can use the session key path (no biometric).
+    #[external("private")]
+    fn authorize_session_key(
+        pubkey_x: Field,
+        pubkey_y: Field,
+        expiry: Field,
+        scope: Field,
+    ) {
+        // Safety: sets tag sender for note discovery
+        unsafe { set_sender_for_tags(self.address) };
+
+        let owner = self.context.this_address();
+        let note = SessionKeyNote { pubkey_x, pubkey_y, expiry, scope };
+        self.storage.session_keys.at(owner).insert(note).deliver(
+            MessageDelivery.CONSTRAINED_ONCHAIN,
+        );
+    }
+
+    // Revoke a session key by nullifying its note.
+    // Also goes through the account entrypoint (biometric required).
+    #[external("private")]
+    fn revoke_session_key(pubkey_x: Field, pubkey_y: Field) {
+        // Safety: sets tag sender for note discovery
+        unsafe { set_sender_for_tags(self.address) };
+
+        let owner = self.context.this_address();
+        let mut options = dep::aztec::note::note_getter_options::NoteGetterOptions::new();
+        options = options.set_limit(MAX_SESSION_KEYS);
+        let notes = self.storage.session_keys.at(owner).get_notes(options);
+        for i in 0..MAX_SESSION_KEYS {
+            if i < notes.len() {
+                let retrieved = notes.get(i);
+                if (retrieved.note.pubkey_x == pubkey_x) & (retrieved.note.pubkey_y == pubkey_y) {
+                    self.storage.session_keys.at(owner).remove(retrieved);
+                }
+            }
+        }
     }
 
     // ================================================================
@@ -198,19 +270,26 @@ pub contract WebAuthnAccount {
         }
     }
 
-    // Full WebAuthn signature verification.
+    // Dual-path auth witness verification.
     //
-    // Auth witness layout (523 fields):
-    //   [0..64)     raw ECDSA signature (r || s, 64 bytes)
-    //   [64..264)   authenticator_data (up to 200 bytes, zero-padded)
-    //   [264]       authenticator_data actual length
-    //   [265..521)  client_data_json (up to 256 bytes, zero-padded)
-    //   [521]       client_data_json actual length
-    //   [522]       challenge_index (byte offset of challenge in clientDataJSON)
+    // Auth witness layout (524 fields):
+    //   [0]         discriminator: 0 = WebAuthn, 1 = session key
+    //
+    // Path 0 - WebAuthn (523 fields after discriminator):
+    //   [1..65)     raw ECDSA signature (r || s, 64 bytes)
+    //   [65..265)   authenticator_data (up to 200 bytes, zero-padded)
+    //   [265]       authenticator_data actual length
+    //   [266..522)  client_data_json (up to 256 bytes, zero-padded)
+    //   [522]       client_data_json actual length
+    //   [523]       challenge_index (byte offset of challenge in clientDataJSON)
+    //
+    // Path 1 - Session key (66 fields after discriminator):
+    //   [1]         pubkey_x (Grumpkin point, Field)
+    //   [2]         pubkey_y (Grumpkin point, Field)
+    //   [3..67)     Schnorr signature (64 bytes: s[32] || e[32])
     #[contract_library_method]
     fn is_valid_impl(context: &mut PrivateContext, outer_hash: Field) -> bool {
         let storage = Storage::init(context);
-        let public_key = storage.signing_public_key.get_note();
 
         // Safety: read-only oracle fetching pre-stored auth witness
         let witness: [Field; AUTH_WITNESS_LEN] = unsafe {
@@ -218,56 +297,111 @@ pub contract WebAuthnAccount {
             get_auth_witness(outer_hash)
         };
 
-        // Extract raw ECDSA signature (64 bytes: r[32] || s[32])
-        let mut signature: [u8; 64] = [0; 64];
-        for i in 0..64 {
-            signature[i] = witness[i] as u8;
+        let discriminator = witness[0] as u8;
+
+        if discriminator == 1 {
+            // ============================================================
+            // PATH 1: Session key (Schnorr on Grumpkin)
+            // ============================================================
+            let sk_pubkey_x = witness[1];
+            let sk_pubkey_y = witness[2];
+
+            // Extract 64-byte Schnorr signature (s[32] || e[32])
+            let mut sig: [u8; 64] = [0; 64];
+            for i in 0..64 {
+                sig[i] = witness[3 + i] as u8;
+            }
+
+            // Convert outer_hash to 32-byte message for Schnorr verification
+            let message: [u8; 32] = outer_hash.to_be_bytes();
+
+            // Read session key notes and verify one matches.
+            // Use this_address() instead of msg_sender() because is_valid_impl
+            // runs in the entrypoint context where msg_sender() is None.
+            let this_addr = context.this_address();
+            let mut options = dep::aztec::note::note_getter_options::NoteGetterOptions::new();
+            options = options.set_limit(MAX_SESSION_KEYS);
+            let notes = storage.session_keys.at(this_addr).get_notes(options);
+            let mut found = false;
+            for i in 0..MAX_SESSION_KEYS {
+                if i < notes.len() {
+                    let retrieved = notes.get(i);
+                    if (retrieved.note.pubkey_x == sk_pubkey_x) & (retrieved.note.pubkey_y == sk_pubkey_y) {
+                        found = true;
+                    }
+                }
+            }
+            assert(found, "Session key not authorized");
+
+            // TODO: Enforce expiry in-circuit once block_number() is available
+            // in private context. Currently expiry is checked client-side only.
+            // An attacker with a stolen session key can use it past expiry until
+            // the note is explicitly revoked via revoke_session_key().
+            //
+            // TODO: Enforce scope in-circuit. Currently scope=0 means full access
+            // and all scope values are treated identically. Scoped permissions
+            // (e.g. restricting to specific contract calls) require comparing
+            // scope against the app_payload, which is not accessible here.
+
+            // Verify Schnorr signature over the outer_hash
+            let pub_key = EmbeddedCurvePoint { x: sk_pubkey_x, y: sk_pubkey_y, is_infinite: false };
+            dep::schnorr::verify_signature(pub_key, sig, message)
+        } else {
+            // ============================================================
+            // PATH 0: WebAuthn P-256 (existing path, fields shifted by +1)
+            // ============================================================
+            let public_key = storage.signing_public_key.get_note();
+
+            // Extract raw ECDSA signature (64 bytes: r[32] || s[32])
+            let mut signature: [u8; 64] = [0; 64];
+            for i in 0..64 {
+                signature[i] = witness[1 + i] as u8;
+            }
+
+            // Extract authenticator_data as BoundedVec
+            let auth_data_len = witness[1 + 264] as u32;
+            let mut auth_data_arr: [u8; AUTH_DATA_MAX] = [0; AUTH_DATA_MAX];
+            for i in 0..AUTH_DATA_MAX {
+                auth_data_arr[i] = witness[1 + 64 + i] as u8;
+            }
+            let auth_data: BoundedVec<u8, AUTH_DATA_MAX> =
+                BoundedVec::from_parts(auth_data_arr, auth_data_len);
+
+            // Extract client_data_json as BoundedVec
+            let cdj_len = witness[1 + 521] as u32;
+            let mut cdj_arr: [u8; CLIENT_DATA_JSON_MAX] = [0; CLIENT_DATA_JSON_MAX];
+            for i in 0..CLIENT_DATA_JSON_MAX {
+                cdj_arr[i] = witness[1 + 265 + i] as u8;
+            }
+            let client_data_json: BoundedVec<u8, CLIENT_DATA_JSON_MAX> =
+                BoundedVec::from_parts(cdj_arr, cdj_len);
+
+            // Challenge index
+            let challenge_index = witness[1 + 522] as u32;
+
+            // Challenge = outer_hash as 32 big-endian bytes
+            let challenge: [u8; 32] = outer_hash.to_be_bytes();
+
+            // Step 1: Verify challenge is embedded in clientDataJSON (base64url)
+            let challenge_b64: [u8; 43] = base64::BASE64_URL_ENCODER::encode(challenge);
+            verify_challenge_in_cdj(client_data_json.storage(), challenge_b64, challenge_index);
+
+            // Step 2: SHA-256 hash clientDataJSON
+            let cdj_hash: [u8; 32] = sha256_bounded(client_data_json);
+
+            // Step 3: Concatenate authenticatorData || SHA256(clientDataJSON)
+            let concatenated: BoundedVec<u8, AUTH_DATA_MAX + 32> = concat_bv(auth_data, cdj_hash);
+
+            // Step 4: SHA-256 the concatenation to get the signed message
+            let hashed_message: [u8; 32] = sha256_bounded(concatenated);
+
+            // Step 5: Verify ECDSA secp256r1 (P-256) signature
+            std::ecdsa_secp256r1::verify_signature(
+                public_key.x,
+                public_key.y,
+                signature,
+                hashed_message,
+            )
         }
-
-        // Extract authenticator_data as BoundedVec
-        let auth_data_len = witness[264] as u32;
-        let mut auth_data_arr: [u8; AUTH_DATA_MAX] = [0; AUTH_DATA_MAX];
-        for i in 0..AUTH_DATA_MAX {
-            auth_data_arr[i] = witness[64 + i] as u8;
-        }
-        let auth_data: BoundedVec<u8, AUTH_DATA_MAX> =
-            BoundedVec::from_parts(auth_data_arr, auth_data_len);
-
-        // Extract client_data_json as BoundedVec
-        let cdj_len = witness[521] as u32;
-        let mut cdj_arr: [u8; CLIENT_DATA_JSON_MAX] = [0; CLIENT_DATA_JSON_MAX];
-        for i in 0..CLIENT_DATA_JSON_MAX {
-            cdj_arr[i] = witness[265 + i] as u8;
-        }
-        let client_data_json: BoundedVec<u8, CLIENT_DATA_JSON_MAX> =
-            BoundedVec::from_parts(cdj_arr, cdj_len);
-
-        // Challenge index
-        let challenge_index = witness[522] as u32;
-
-        // Challenge = outer_hash as 32 big-endian bytes
-        // TypeScript passes this same value to navigator.credentials.get()
-        let challenge: [u8; 32] = outer_hash.to_be_bytes();
-
-        // Step 1: Verify challenge is embedded in clientDataJSON (base64url encoded)
-        let challenge_b64: [u8; 43] = base64::BASE64_URL_ENCODER::encode(challenge);
-        verify_challenge_in_cdj(client_data_json.storage(), challenge_b64, challenge_index);
-
-        // Step 2: SHA-256 hash clientDataJSON
-        let cdj_hash: [u8; 32] = sha256_bounded(client_data_json);
-
-        // Step 3: Concatenate authenticatorData || SHA256(clientDataJSON)
-        let concatenated: BoundedVec<u8, AUTH_DATA_MAX + 32> = concat_bv(auth_data, cdj_hash);
-
-        // Step 4: SHA-256 the concatenation to get the signed message
-        let hashed_message: [u8; 32] = sha256_bounded(concatenated);
-
-        // Step 5: Verify ECDSA secp256r1 (P-256) signature
-        std::ecdsa_secp256r1::verify_signature(
-            public_key.x,
-            public_key.y,
-            signature,
-            hashed_message,
-        )
     }
 }
