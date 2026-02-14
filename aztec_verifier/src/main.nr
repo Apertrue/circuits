@@ -33,7 +33,7 @@ pub contract ApertrueVerifier {
             hash::poseidon2_hash,
             traits::{Deserialize, Packable, Serialize, ToField},
         },
-        state_vars::{Owned, PrivateSet, PublicImmutable},
+        state_vars::{Owned, PrivateSet, PublicImmutable, PublicMutable},
     };
 
     use dep::bb_proof_verification::{
@@ -79,6 +79,10 @@ pub contract ApertrueVerifier {
         vk_hash: PublicImmutable<Field, Context>,
         // Private notes per owner (Owned wraps PrivateSet for owner-keyed access)
         verified_notes: Owned<PrivateSet<VerifiedMediaNote, Context>, Context>,
+        // Verification index Merkle root (updated by admin after batch commits)
+        verification_root: PublicMutable<Field, Context>,
+        // Verification index tree size (monotonically increasing)
+        tree_size: PublicMutable<Field, Context>,
     }
 
     // ================================================================
@@ -211,5 +215,42 @@ pub contract ApertrueVerifier {
     #[view]
     fn get_admin() -> AztecAddress {
         self.storage.admin.read()
+    }
+
+    // ================================================================
+    // VERIFICATION INDEX MERKLE ROOT (public, admin-only writes)
+    // ================================================================
+
+    // Update the verification index Merkle root after a batch commit.
+    // Only the admin (deployer) can call this.
+    // Tree size must be monotonically increasing to prevent rollbacks.
+    #[external("public")]
+    fn update_merkle_root(new_root: Field, new_tree_size: Field) {
+        let admin = self.storage.admin.read();
+        let sender = self.context.msg_sender().unwrap();
+        assert(sender == admin, "Only admin can update Merkle root");
+
+        let current_size = self.storage.tree_size.read();
+        assert(
+            new_tree_size as u64 >= current_size as u64,
+            "Tree size cannot decrease",
+        );
+
+        self.storage.verification_root.write(new_root);
+        self.storage.tree_size.write(new_tree_size);
+    }
+
+    // Get the current verification index Merkle root
+    #[external("public")]
+    #[view]
+    fn get_verification_root() -> Field {
+        self.storage.verification_root.read()
+    }
+
+    // Get the current verification index tree size
+    #[external("public")]
+    #[view]
+    fn get_tree_size() -> Field {
+        self.storage.tree_size.read()
     }
 }

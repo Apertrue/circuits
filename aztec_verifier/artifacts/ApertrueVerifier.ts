@@ -90,7 +90,7 @@ export class ApertrueVerifierContract extends ContractBase {
   }
   
 
-  public static get storage(): ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes'> {
+  public static get storage(): ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'verification_root' | 'tree_size'> {
       return {
         admin: {
       slot: new Fr(1n),
@@ -100,8 +100,14 @@ vk_hash: {
     },
 verified_notes: {
       slot: new Fr(5n),
+    },
+verification_root: {
+      slot: new Fr(6n),
+    },
+tree_size: {
+      slot: new Fr(7n),
     }
-      } as ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes'>;
+      } as ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'verification_root' | 'tree_size'>;
     }
     
 
@@ -114,6 +120,12 @@ verified_notes: {
     /** get_admin() */
     get_admin: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
+    /** get_tree_size() */
+    get_tree_size: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** get_verification_root() */
+    get_verification_root: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
     /** get_vk_hash() */
     get_vk_hash: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
@@ -125,6 +137,9 @@ verified_notes: {
 
     /** sync_private_state() */
     sync_private_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** update_merkle_root(new_root: field, new_tree_size: field) */
+    update_merkle_root: ((new_root: FieldLike, new_tree_size: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** verify_and_store(proof: array, vk: array, vk_hash: field, public_values: array, image_count: field, trust_list_root: field, epoch_week: field, owner: struct) */
     verify_and_store: ((proof: FieldLike[], vk: FieldLike[], vk_hash: FieldLike, public_values: FieldLike[], image_count: FieldLike, trust_list_root: FieldLike, epoch_week: FieldLike, owner: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
