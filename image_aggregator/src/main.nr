@@ -16,6 +16,17 @@
 // IMPORTANT: verify_honk_proof requires ALL public inputs+outputs from the inner proof.
 // ProofA has 50 public values (15 inputs + 35 outputs), ProofB has 9 public values (8 inputs + 1 output).
 //
+// Public values layout (9 total = 4 inputs + 5 outputs):
+// [0] trust_list_root (input)
+// [1] content_hash (input)
+// [2] nullifier (input)
+// [3] proof_timestamp (input)
+// [4] location_commitment (output)
+// [5] time_commitment (output)
+// [6] link_commit (output)
+// [7] actions_hash_field (output)
+// [8] image_commitment (output)
+//
 // Estimated constraints: ~100k (2x verify_proof + Poseidon hash)
 
 use dep::bb_proof_verification::{
@@ -42,8 +53,13 @@ global PROOF_B_PUBLIC_VALUES: u32 = 9;
 // - nullifier: H(content_hash, leaf_key_hash) for replay prevention
 // - proof_timestamp: When proofs were generated (Unix seconds)
 //
-// PUBLIC OUTPUT:
-// - image_commitment: Poseidon2([trust_list_root, content_hash, nullifier, proof_timestamp])
+// PUBLIC OUTPUTS:
+// - location_commitment: Poseidon2 commitment to exact GPS + salt (from ProofA)
+// - time_commitment: Poseidon2 commitment to exact timestamp + salt (from ProofA)
+// - link_commit: Device identity binding (Pedersen hash from ProofA)
+// - actions_hash_field: Poseidon2 reduction of C2PA actions SHA-256 hash (from ProofA)
+// - image_commitment: Poseidon2([trust_list_root, content_hash, nullifier, proof_timestamp,
+//                                location_commitment, time_commitment, link_commit, actions_hash_field])
 fn main(
     // === PUBLIC INPUTS (must match shared fields in ProofA/ProofB) ===
     trust_list_root: pub Field,
@@ -103,7 +119,7 @@ fn main(
     // ProofB PUBLIC OUTPUT (1 total):
     // [8] link_commit: Field
     proof_b_public_values: [Field; 9],
-) -> pub Field {
+) -> pub (Field, Field, Field, Field, Field) {
     // ================================================================
     // STEP 1: Verify ProofA (certificate chain verification)
     // ================================================================
@@ -192,15 +208,36 @@ fn main(
     );
 
     // ================================================================
-    // STEP 5: Compute image_commitment for tree aggregation
+    // STEP 5: Extract ProofA commitment outputs
+    // ================================================================
+    // ProofA outputs at indices 15-17 are commitment fields:
+    // [15] link_commit, [16] location_commitment, [17] time_commitment
+    let link_commit = proof_a_public_values[15];
+    let location_commitment = proof_a_public_values[16];
+    let time_commitment = proof_a_public_values[17];
+
+    // ProofA outputs at indices 18-49 are actions_assertion_hash [u8; 32] as Fields.
+    // Reduce to a single Field via Poseidon2 for inclusion in image_commitment.
+    let mut actions_bytes: [Field; 32] = [0; 32];
+    for i in 0..32 {
+        actions_bytes[i] = proof_a_public_values[18 + i];
+    }
+    let actions_hash_field = Poseidon2::hash(actions_bytes, 32);
+
+    // ================================================================
+    // STEP 6: Compute image_commitment for tree aggregation
     // ================================================================
     // This commitment uniquely identifies this verified image in the aggregation tree.
+    // Expanded from 4 to 8 inputs to include all ProofA commitment outputs.
     let image_commitment = Poseidon2::hash(
-        [trust_list_root, content_hash, nullifier, proof_timestamp],
-        4
+        [
+            trust_list_root, content_hash, nullifier, proof_timestamp,
+            location_commitment, time_commitment, link_commit, actions_hash_field,
+        ],
+        8,
     );
 
-    image_commitment
+    (location_commitment, time_commitment, link_commit, actions_hash_field, image_commitment)
 }
 
 // ====================================================================
@@ -213,9 +250,21 @@ fn test_image_commitment_deterministic() {
     let content_hash: Field = 12345678901234567890;
     let nullifier: Field = 98765432109876543210;
     let proof_timestamp: Field = 1706745600;
+    let location_commitment: Field = 55555555555555555555;
+    let time_commitment: Field = 66666666666666666666;
+    let link_commit: Field = 77777777777777777777;
+    let actions_hash_field: Field = 88888888888888888888;
 
-    let commit1 = Poseidon2::hash([trust_list_root, content_hash, nullifier, proof_timestamp], 4);
-    let commit2 = Poseidon2::hash([trust_list_root, content_hash, nullifier, proof_timestamp], 4);
+    let commit1 = Poseidon2::hash(
+        [trust_list_root, content_hash, nullifier, proof_timestamp,
+         location_commitment, time_commitment, link_commit, actions_hash_field],
+        8,
+    );
+    let commit2 = Poseidon2::hash(
+        [trust_list_root, content_hash, nullifier, proof_timestamp,
+         location_commitment, time_commitment, link_commit, actions_hash_field],
+        8,
+    );
 
     assert(commit1 == commit2, "Image commitment should be deterministic");
 }
@@ -227,9 +276,29 @@ fn test_different_inputs_different_commitment() {
     let content_hash2: Field = 22222222222222222222;
     let nullifier: Field = 99999999999999999999;
     let timestamp: Field = 1706745600;
+    let loc: Field = 55555555555555555555;
+    let time: Field = 66666666666666666666;
+    let link: Field = 77777777777777777777;
+    let actions: Field = 88888888888888888888;
 
-    let commit1 = Poseidon2::hash([trust_list_root, content_hash1, nullifier, timestamp], 4);
-    let commit2 = Poseidon2::hash([trust_list_root, content_hash2, nullifier, timestamp], 4);
+    let commit1 = Poseidon2::hash(
+        [trust_list_root, content_hash1, nullifier, timestamp, loc, time, link, actions],
+        8,
+    );
+    let commit2 = Poseidon2::hash(
+        [trust_list_root, content_hash2, nullifier, timestamp, loc, time, link, actions],
+        8,
+    );
 
     assert(commit1 != commit2, "Different content_hash should produce different commitment");
+}
+
+#[test]
+fn test_actions_hash_reduction() {
+    // Test that Poseidon2 of 32 zero bytes produces a non-zero hash
+    let zero_actions: [Field; 32] = [0; 32];
+    let hash = Poseidon2::hash(zero_actions, 32);
+    // Just verify it computes without error and is deterministic
+    let hash2 = Poseidon2::hash(zero_actions, 32);
+    assert(hash == hash2, "Actions hash reduction should be deterministic");
 }
