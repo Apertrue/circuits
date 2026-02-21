@@ -1,0 +1,9 @@
+[package]
+name = "jwt_identity"
+type = "bin"
+authors = ["Apertrue Social"]
+compiler_version = ">=1.0.0"
+description = "JWT identity verification - proves org membership from Google OAuth JWT without revealing email"
+
+[dependencies]
+noir_jwt = { tag = "v0.5.1", git = "https://github.com/saleel/noir-jwt" }
