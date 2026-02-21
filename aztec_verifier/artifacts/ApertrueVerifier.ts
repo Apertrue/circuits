@@ -90,7 +90,7 @@ export class ApertrueVerifierContract extends ContractBase {
   }
   
 
-  public static get storage(): ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'verification_root' | 'tree_size'> {
+  public static get storage(): ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'identity_notes' | 'verification_root' | 'tree_size'> {
       return {
         admin: {
       slot: new Fr(1n),
@@ -101,19 +101,25 @@ vk_hash: {
 verified_notes: {
       slot: new Fr(5n),
     },
-verification_root: {
+identity_notes: {
       slot: new Fr(6n),
     },
-tree_size: {
+verification_root: {
       slot: new Fr(7n),
+    },
+tree_size: {
+      slot: new Fr(8n),
     }
-      } as ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'verification_root' | 'tree_size'>;
+      } as ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'identity_notes' | 'verification_root' | 'tree_size'>;
     }
     
 
   /** Type-safe wrappers for the public methods exposed by the contract. */
   public declare methods: {
     
+    /** commit_identity(identity_proof_hash: field, domain_hash: field, owner: struct) */
+    commit_identity: ((identity_proof_hash: FieldLike, domain_hash: FieldLike, owner: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
     /** constructor(admin: struct, initial_vk_hash: field) */
     constructor: ((admin: AztecAddressLike, initial_vk_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 

@@ -67,6 +67,25 @@ pub contract ApertrueVerifier {
     }
 
     // ================================================================
+    // NOTE TYPE: IdentityNote
+    // ================================================================
+
+    // A private note representing a verified organization identity.
+    // Only the owner can decrypt and read it.
+    // Separate from VerifiedMediaNote -- identity is user-level, not image-level.
+    //
+    // Fields:
+    //   identity_proof_hash - Poseidon2 hash of the ZK identity proof bytes
+    //   domain_hash         - Poseidon2 hash of the domain string packed into fields
+
+    #[derive(Deserialize, Eq, Packable, Serialize)]
+    #[note]
+    pub struct IdentityNote {
+        identity_proof_hash: Field,
+        domain_hash: Field,
+    }
+
+    // ================================================================
     // STORAGE
     // ================================================================
 
@@ -79,6 +98,8 @@ pub contract ApertrueVerifier {
         vk_hash: PublicImmutable<Field, Context>,
         // Private notes per owner (Owned wraps PrivateSet for owner-keyed access)
         verified_notes: Owned<PrivateSet<VerifiedMediaNote, Context>, Context>,
+        // Identity notes per owner (ZK-verified org membership)
+        identity_notes: Owned<PrivateSet<IdentityNote, Context>, Context>,
         // Verification index Merkle root (updated by admin after batch commits)
         verification_root: PublicMutable<Field, Context>,
         // Verification index tree size (monotonically increasing)
@@ -185,6 +206,7 @@ pub contract ApertrueVerifier {
         // notes without needing this contract registered as a sender.
         // Required when TX does not go through an account entrypoint
         // (verify_and_store is proof-authorized, not account-authorized).
+        // Safety: set_sender_for_tags is an oracle call to configure note tagging
         unsafe { set_sender_for_tags(owner) };
 
         let note = VerifiedMediaNote {
@@ -199,6 +221,47 @@ pub contract ApertrueVerifier {
         // fee payment setup via account entrypoint). Notes are still encrypted
         // to the owner and discoverable by their PXE.
         self.storage.verified_notes.at(owner).insert(note).deliver(
+            MessageDelivery.UNCONSTRAINED_OFFCHAIN,
+        );
+    }
+
+    // ================================================================
+    // IDENTITY COMMITMENT
+    // ================================================================
+
+    // Commit a ZK-verified organization identity as a private note.
+    // Replay prevention via nullifier derived from identity_proof_hash.
+    // Called from browser via session key (no biometric prompt).
+    //
+    // Arguments:
+    //   identity_proof_hash - Poseidon2 hash of the identity proof bytes
+    //   domain_hash         - Poseidon2 hash of the domain string
+    //   owner               - Note owner (caller's address)
+    #[external("private")]
+    fn commit_identity(
+        identity_proof_hash: Field,
+        domain_hash: Field,
+        owner: AztecAddress,
+    ) {
+        assert(identity_proof_hash != 0, "identity_proof_hash must not be zero");
+        assert(domain_hash != 0, "domain_hash must not be zero");
+        assert(!owner.is_zero(), "owner must not be zero address");
+
+        // Replay prevention: same identity proof cannot be committed twice
+        let replay_nullifier = poseidon2_hash(
+            [identity_proof_hash, self.context.this_address().to_field()],
+        );
+        self.context.push_nullifier(replay_nullifier);
+
+        // Safety: set_sender_for_tags is an oracle call to configure note tagging
+        unsafe { set_sender_for_tags(owner) };
+
+        let note = IdentityNote {
+            identity_proof_hash,
+            domain_hash,
+        };
+
+        self.storage.identity_notes.at(owner).insert(note).deliver(
             MessageDelivery.UNCONSTRAINED_OFFCHAIN,
         );
     }
