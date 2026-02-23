@@ -86,6 +86,25 @@ pub contract ApertrueVerifier {
     }
 
     // ================================================================
+    // NOTE TYPE: PassportIdentityNote
+    // ================================================================
+
+    // A private note representing a ZKPassport-verified identity.
+    // Separate from IdentityNote -- passport proves personhood,
+    // identity proves org membership.
+    //
+    // Fields:
+    //   passport_proof_hash - Poseidon2 hash of the ZKPassport proof bytes
+    //   nullifier_hash      - Poseidon2 hash of the app-scoped nullifier
+
+    #[derive(Deserialize, Eq, Packable, Serialize)]
+    #[note]
+    pub struct PassportIdentityNote {
+        passport_proof_hash: Field,
+        nullifier_hash: Field,
+    }
+
+    // ================================================================
     // STORAGE
     // ================================================================
 
@@ -100,6 +119,8 @@ pub contract ApertrueVerifier {
         verified_notes: Owned<PrivateSet<VerifiedMediaNote, Context>, Context>,
         // Identity notes per owner (ZK-verified org membership)
         identity_notes: Owned<PrivateSet<IdentityNote, Context>, Context>,
+        // Passport identity notes per owner (ZKPassport-verified personhood)
+        passport_identity_notes: Owned<PrivateSet<PassportIdentityNote, Context>, Context>,
         // Verification index Merkle root (updated by admin after batch commits)
         verification_root: PublicMutable<Field, Context>,
         // Verification index tree size (monotonically increasing)
@@ -262,6 +283,47 @@ pub contract ApertrueVerifier {
         };
 
         self.storage.identity_notes.at(owner).insert(note).deliver(
+            MessageDelivery.UNCONSTRAINED_OFFCHAIN,
+        );
+    }
+
+    // ================================================================
+    // PASSPORT IDENTITY COMMITMENT
+    // ================================================================
+
+    // Commit a ZKPassport-verified identity as a private note.
+    // Replay prevention via nullifier derived from passport_proof_hash.
+    // Called from browser via session key (no biometric prompt).
+    //
+    // Arguments:
+    //   passport_proof_hash - Poseidon2 hash of the passport proof bytes
+    //   nullifier_hash      - Poseidon2 hash of the app-scoped nullifier
+    //   owner               - Note owner (caller's address)
+    #[external("private")]
+    fn commit_passport_identity(
+        passport_proof_hash: Field,
+        nullifier_hash: Field,
+        owner: AztecAddress,
+    ) {
+        assert(passport_proof_hash != 0, "passport_proof_hash must not be zero");
+        assert(nullifier_hash != 0, "nullifier_hash must not be zero");
+        assert(!owner.is_zero(), "owner must not be zero address");
+
+        // Replay prevention: same passport proof cannot be committed twice
+        let replay_nullifier = poseidon2_hash(
+            [passport_proof_hash, self.context.this_address().to_field()],
+        );
+        self.context.push_nullifier(replay_nullifier);
+
+        // Safety: set_sender_for_tags is an oracle call to configure note tagging
+        unsafe { set_sender_for_tags(owner) };
+
+        let note = PassportIdentityNote {
+            passport_proof_hash,
+            nullifier_hash,
+        };
+
+        self.storage.passport_identity_notes.at(owner).insert(note).deliver(
             MessageDelivery.UNCONSTRAINED_OFFCHAIN,
         );
     }

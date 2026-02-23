@@ -90,7 +90,7 @@ export class ApertrueVerifierContract extends ContractBase {
   }
   
 
-  public static get storage(): ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'identity_notes' | 'verification_root' | 'tree_size'> {
+  public static get storage(): ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'identity_notes' | 'passport_identity_notes' | 'verification_root' | 'tree_size'> {
       return {
         admin: {
       slot: new Fr(1n),
@@ -104,13 +104,16 @@ verified_notes: {
 identity_notes: {
       slot: new Fr(6n),
     },
-verification_root: {
+passport_identity_notes: {
       slot: new Fr(7n),
     },
-tree_size: {
+verification_root: {
       slot: new Fr(8n),
+    },
+tree_size: {
+      slot: new Fr(9n),
     }
-      } as ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'identity_notes' | 'verification_root' | 'tree_size'>;
+      } as ContractStorageLayout<'admin' | 'vk_hash' | 'verified_notes' | 'identity_notes' | 'passport_identity_notes' | 'verification_root' | 'tree_size'>;
     }
     
 
@@ -119,6 +122,9 @@ tree_size: {
     
     /** commit_identity(identity_proof_hash: field, domain_hash: field, owner: struct) */
     commit_identity: ((identity_proof_hash: FieldLike, domain_hash: FieldLike, owner: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** commit_passport_identity(passport_proof_hash: field, nullifier_hash: field, owner: struct) */
+    commit_passport_identity: ((passport_proof_hash: FieldLike, nullifier_hash: FieldLike, owner: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** constructor(admin: struct, initial_vk_hash: field) */
     constructor: ((admin: AztecAddressLike, initial_vk_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
