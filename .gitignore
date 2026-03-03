@@ -3,6 +3,11 @@ target/
 Prover.toml
 Verifier.toml
 
+# Environment
+.env
+.env.local
+.env.*.local
+
 # Claude Code artifacts
 CLAUDE.md
 .claude/
