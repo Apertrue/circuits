@@ -71,7 +71,7 @@ where
 
     let inner_hash = dep::poseidon::poseidon2::Poseidon2::hash([outer_hash, salt], 2);
 
-    // TODO do we need to assert is in field?; I think we do?
+    // Field membership is implicitly enforced by to_le_bytes conversion below
     let inner_hash: [u8; 32] = inner_hash.to_le_bytes();
     let x = Fq::derive_from_seed(inner_hash);
     let yy = x * x * x + a * x + b;
