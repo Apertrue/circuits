@@ -1,7 +1,0 @@
-[package]
-name = "apertrue_hiding"
-type = "bin"
-authors = ["Apertrue"]
-edition = "2024.09"
-
-[dependencies]

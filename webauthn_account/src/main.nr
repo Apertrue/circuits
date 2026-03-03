@@ -348,15 +348,16 @@ pub contract WebAuthnAccount {
             }
             assert(found, "Session key not authorized");
 
-            // TODO: Enforce expiry in-circuit once block_number() is available
-            // in private context. Currently expiry is checked client-side only.
-            // An attacker with a stolen session key can use it past expiry until
-            // the note is explicitly revoked via revoke_session_key().
+            // KNOWN LIMITATION: Expiry is not enforced in-circuit. block_number()
+            // is unavailable in private context (Aztec v3.0.3). Expiry is checked
+            // client-side only. Stolen session keys remain valid until explicitly
+            // revoked via revoke_session_key(). Acceptable for MVP; revisit when
+            // Aztec exposes block number in private.
             //
-            // TODO: Enforce scope in-circuit. Currently scope=0 means full access
-            // and all scope values are treated identically. Scoped permissions
-            // (e.g. restricting to specific contract calls) require comparing
-            // scope against the app_payload, which is not accessible here.
+            // KNOWN LIMITATION: Scope is not enforced in-circuit. All scope values
+            // are treated identically (scope=0 means full access). Scoped permissions
+            // require comparing scope against app_payload, which is not accessible
+            // in the entrypoint context. Acceptable for MVP.
 
             // Verify Schnorr signature over the outer_hash
             let pub_key = EmbeddedCurvePoint { x: sk_pubkey_x, y: sk_pubkey_y, is_infinite: false };
