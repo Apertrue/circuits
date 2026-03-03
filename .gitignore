@@ -1,0 +1,24 @@
+# Noir build artifacts
+target/
+Prover.toml
+Verifier.toml
+
+# Claude Code artifacts
+CLAUDE.md
+.claude/
+.agents/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+*.tmp
+*.temp
+*.log
