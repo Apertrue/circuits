@@ -1,7 +1,7 @@
 [package]
 name = "apertrue_proof_b_ps256"
 type = "bin"
-authors = ["Apertrue Social"]
+authors = ["Apertrue"]
 compiler_version = ">=1.0.0"
 description = "ProofB PS256: RSA-only COSE signature verification for algorithm specialization (~160k constraints)"
 

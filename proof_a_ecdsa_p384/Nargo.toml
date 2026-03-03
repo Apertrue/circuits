@@ -1,7 +1,7 @@
 [package]
 name = "apertrue_proof_a_ecdsa_p384"
 type = "bin"
-authors = ["Apertrue Social"]
+authors = ["Apertrue"]
 compiler_version = ">=1.0.0"
 description = "ProofA ECDSA P-384: Certificate chain verification for ECDSA P-384 only (~150k constraints)"
 

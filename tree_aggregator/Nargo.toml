@@ -1,7 +1,7 @@
 [package]
 name = "tree_aggregator"
 type = "bin"
-authors = ["Apertrue Social"]
+authors = ["Apertrue"]
 compiler_version = ">=1.0.0"
 description = "TreeAggregator: Combines 2 proofs into 1 for binary tree aggregation (reusable at any tree level)"
 

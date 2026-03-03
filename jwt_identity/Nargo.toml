@@ -1,7 +1,7 @@
 [package]
 name = "jwt_identity"
 type = "bin"
-authors = ["Apertrue Social"]
+authors = ["Apertrue"]
 compiler_version = ">=1.0.0"
 description = "JWT identity verification - proves org membership from Google OAuth JWT without revealing email"
 

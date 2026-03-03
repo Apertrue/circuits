@@ -1,7 +1,7 @@
 [package]
 name = "apertrue_proof_a_skip"
 type = "bin"
-authors = ["Apertrue Social"]
+authors = ["Apertrue"]
 compiler_version = ">=1.0.0"
 description = "ProofA Skip: 2-cert chain verification mode (~80k constraints). For ProofMode/self-signed where leaf is directly signed by root CA."
 
