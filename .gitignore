@@ -1,7 +1,5 @@
 # Noir build artifacts
 target/
-Prover.toml
-Verifier.toml
 
 # Environment
 .env
