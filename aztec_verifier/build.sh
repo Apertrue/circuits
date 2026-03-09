@@ -5,15 +5,13 @@
 # Automates the full pipeline from Noir source to deployment-ready artifact
 # with TypeScript bindings:
 #
-#   1. nargo compile         -> raw ACIR artifact
-#   2. bb-avm aztec_process  -> AVM transpilation + VK generation (v3.0.3)
-#   3. strip name prefix     -> remove __aztec_nr_internals__ prefix
-#   4. aztec-builder codegen -> TypeScript bindings
+#   1. aztec compile          -> nargo compile + AVM transpilation + VK generation (v4.0.4)
+#   2. strip name prefix      -> remove __aztec_nr_internals__ prefix
+#   3. aztec codegen           -> TypeScript bindings
 #
 # Requirements:
-#   - nargo (Noir compiler)
-#   - Docker container 'aztec-submitter-aztec-1' running (v3.0.3 sandbox)
-#   - npx aztec-builder (@aztec/builder package)
+#   - Aztec v4.0.4 toolchain (~/.aztec/versions/4.0.4/)
+#   - bash 4+ (macOS: /opt/homebrew/bin/bash)
 #   - python3
 #
 # Usage:
@@ -28,9 +26,37 @@ TARGET_DIR="$PROJECT_DIR/target"
 ARTIFACT_NAME="apertrue_verifier-ApertrueVerifier.json"
 ARTIFACT_PATH="$TARGET_DIR/$ARTIFACT_NAME"
 ARTIFACTS_DIR="$PROJECT_DIR/artifacts"
-SIDECAR_DIR="$SCRIPT_DIR/../../services/aztec-submitter/src"
-DOCKER_CONTAINER="aztec-submitter-aztec-1"
-BB_AVM="/usr/src/barretenberg/cpp/build/bin/bb-avm"
+SIDECAR_DIR="$SCRIPT_DIR/../../services/aztec-submitter"
+AZTEC_VERSION="4.0.4"
+AZTEC_DIR="$HOME/.aztec/versions/$AZTEC_VERSION"
+AZTEC_CLI="$AZTEC_DIR/node_modules/.bin/aztec"
+AZTEC_NARGO="$AZTEC_DIR/bin/nargo"
+
+# Detect platform architecture for bb binary
+ARCH="$(uname -m)"
+OS="$(uname -s)"
+if [ "$OS" = "Darwin" ]; then
+  if [ "$ARCH" = "arm64" ]; then
+    BB_PLATFORM="arm64-macos"
+  else
+    BB_PLATFORM="x86_64-macos"
+  fi
+elif [ "$OS" = "Linux" ]; then
+  BB_PLATFORM="x86_64-linux"
+else
+  err "Unsupported platform: $OS/$ARCH"
+  exit 1
+fi
+AZTEC_BB="$AZTEC_DIR/node_modules/@aztec/bb.js/build/$BB_PLATFORM/bb"
+
+# bash 4+ required by aztec CLI (macOS ships bash 3.2)
+if [ -x "/opt/homebrew/bin/bash" ]; then
+  BASH4="/opt/homebrew/bin/bash"
+elif [ -x "/usr/local/bin/bash" ]; then
+  BASH4="/usr/local/bin/bash"
+else
+  BASH4="bash"
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -56,15 +82,24 @@ for arg in "$@"; do
 done
 
 # =============================================================================
-# Step 1: Compile with nargo
+# Step 1: Compile + AVM transpilation + VK generation (aztec compile)
 # =============================================================================
+
+# Verify Aztec toolchain is installed
+if [ ! -f "$AZTEC_CLI" ]; then
+  err "Aztec v$AZTEC_VERSION toolchain not found at $AZTEC_DIR"
+  err "Install with: VERSION=$AZTEC_VERSION bash -i <(curl -sL https://install.aztec.network/$AZTEC_VERSION)"
+  exit 1
+fi
+
 if [ "$SKIP_COMPILE" = false ]; then
-  log "Step 1/4: Compiling with nargo..."
+  log "Step 1/3: Compiling + AVM transpilation + VK generation (aztec compile)..."
   cd "$PROJECT_DIR"
-  nargo compile
-  log "Compilation complete."
+  PATH="$AZTEC_DIR/bin:$AZTEC_DIR/node_modules/@aztec/bb.js/build/$BB_PLATFORM:$PATH" \
+    "$BASH4" -c "$AZTEC_CLI compile --force"
+  log "Compilation + transpilation complete."
 else
-  log "Step 1/4: Skipping nargo compile (--skip-compile)"
+  log "Step 1/3: Skipping compile (--skip-compile)"
 fi
 
 if [ ! -f "$ARTIFACT_PATH" ]; then
@@ -73,34 +108,9 @@ if [ ! -f "$ARTIFACT_PATH" ]; then
 fi
 
 # =============================================================================
-# Step 2: AVM transpilation + VK generation via bb-avm in Docker
-# =============================================================================
-log "Step 2/4: AVM transpilation + VK generation (bb-avm aztec_process)..."
-
-# Verify Docker container is running
-if ! docker ps --format '{{.Names}}' | grep -q "^${DOCKER_CONTAINER}$"; then
-  err "Docker container '$DOCKER_CONTAINER' is not running."
-  err "Start it with: docker compose -f services/aztec-submitter/docker-compose.sandbox.yml up -d"
-  exit 1
-fi
-
-# Copy artifact into container
-docker cp "$ARTIFACT_PATH" "${DOCKER_CONTAINER}:/tmp/input_artifact.json"
-
-# Run bb-avm aztec_process
-docker exec "$DOCKER_CONTAINER" "$BB_AVM" aztec_process \
-  -i /tmp/input_artifact.json \
-  -o /tmp/processed_artifact.json
-
-# Copy processed artifact back
-docker cp "${DOCKER_CONTAINER}:/tmp/processed_artifact.json" "$ARTIFACT_PATH"
-
-log "AVM transpilation complete."
-
-# =============================================================================
 # Step 3: Strip __aztec_nr_internals__ prefix from function names
 # =============================================================================
-log "Step 3/4: Stripping function name prefix..."
+log "Step 2/3: Stripping function name prefix..."
 
 python3 -c "
 import json, sys
@@ -151,12 +161,12 @@ log "Name prefix stripped."
 # =============================================================================
 # Step 4: Generate TypeScript bindings via aztec-builder codegen
 # =============================================================================
-log "Step 4/4: Generating TypeScript bindings (aztec-builder codegen)..."
+log "Step 3/3: Generating TypeScript bindings (aztec codegen)..."
 
 mkdir -p "$ARTIFACTS_DIR"
 
-# Run codegen (pinned to v3.0.3 to match the rest of the Aztec stack)
-npx --package @aztec/builder@3.0.3 aztec-builder codegen "$ARTIFACT_PATH" -o "$ARTIFACTS_DIR" --force
+# Run codegen via aztec CLI (v4)
+"$BASH4" -c "$AZTEC_CLI codegen $ARTIFACT_PATH -o $ARTIFACTS_DIR --force"
 
 # Fix the import path in generated bindings
 # codegen generates an absolute path to the artifact; replace with relative
@@ -187,22 +197,29 @@ with open('$CODEGEN_OUTPUT', 'w') as f:
 print('  Fixed artifact import path')
 "
 
-  # Copy to sidecar
+  # Copy to sidecar: both the codegen bindings and the artifact JSON
   if [ -d "$SIDECAR_DIR" ]; then
-    cp "$CODEGEN_OUTPUT" "$SIDECAR_DIR/ApertrueVerifier.ts"
+    SIDECAR_ARTIFACTS="$SIDECAR_DIR/artifacts"
+    mkdir -p "$SIDECAR_ARTIFACTS"
 
-    # Fix import path for sidecar (different relative path)
+    # Copy artifact JSON so sidecar has its own copy (no cross-package imports)
+    cp "$ARTIFACT_PATH" "$SIDECAR_ARTIFACTS/$ARTIFACT_NAME"
+
+    # Copy codegen bindings to sidecar src/
+    cp "$CODEGEN_OUTPUT" "$SIDECAR_DIR/src/ApertrueVerifier.ts"
+
+    # Fix import path: sidecar imports from its local artifacts/ copy
     python3 -c "
 import re
 
-sidecar_path = '$SIDECAR_DIR/ApertrueVerifier.ts'
+sidecar_path = '$SIDECAR_DIR/src/ApertrueVerifier.ts'
 
 with open(sidecar_path) as f:
     content = f.read()
 
 content = re.sub(
     r\"import ApertrueVerifierContractArtifactJson from '[^']+'\",
-    \"import ApertrueVerifierContractArtifactJson from '../../../circuits/aztec_verifier/target/$ARTIFACT_NAME'\",
+    \"import ApertrueVerifierContractArtifactJson from '../artifacts/$ARTIFACT_NAME'\",
     content
 )
 

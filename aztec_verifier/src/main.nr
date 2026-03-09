@@ -16,11 +16,11 @@
 // - Nullifier derived from root_commitment prevents replay
 // - Diversified addresses prevent cross-batch correlation
 
-use dep::aztec::macros::aztec;
+use ::aztec::macros::aztec;
 
 #[aztec]
 pub contract ApertrueVerifier {
-    use dep::aztec::{
+    use ::aztec::{
         macros::{
             functions::{external, initializer, view},
             notes::note,
@@ -28,7 +28,7 @@ pub contract ApertrueVerifier {
         },
         messages::message_delivery::MessageDelivery,
         oracle::notes::set_sender_for_tags,
-        protocol_types::{
+        protocol::{
             address::AztecAddress,
             hash::poseidon2_hash,
             traits::{Deserialize, Packable, Serialize, ToField},
@@ -36,7 +36,7 @@ pub contract ApertrueVerifier {
         state_vars::{Owned, PrivateSet, PublicImmutable, PublicMutable},
     };
 
-    use dep::bb_proof_verification::{
+    use ::bb_proof_verification::{
         UltraHonkZKProof,
         UltraHonkVerificationKey,
         verify_honk_proof,
@@ -153,7 +153,7 @@ pub contract ApertrueVerifier {
     // historical read (no public call needed).
     //
     // Arguments:
-    //   proof             - 508-field UltraHonkZK proof from tree aggregator
+    //   proof             - 500-field UltraHonkZK proof from tree aggregator
     //   vk                - 115-field verification key for tree aggregator circuit
     //   vk_hash           - Hash of VK (checked against stored immutable hash)
     //   public_values     - 9 public values from tree aggregator:
@@ -242,7 +242,7 @@ pub contract ApertrueVerifier {
         // fee payment setup via account entrypoint). Notes are still encrypted
         // to the owner and discoverable by their PXE.
         self.storage.verified_notes.at(owner).insert(note).deliver(
-            MessageDelivery.UNCONSTRAINED_OFFCHAIN,
+            MessageDelivery.OFFCHAIN,
         );
     }
 
@@ -283,7 +283,7 @@ pub contract ApertrueVerifier {
         };
 
         self.storage.identity_notes.at(owner).insert(note).deliver(
-            MessageDelivery.UNCONSTRAINED_OFFCHAIN,
+            MessageDelivery.OFFCHAIN,
         );
     }
 
@@ -324,7 +324,7 @@ pub contract ApertrueVerifier {
         };
 
         self.storage.passport_identity_notes.at(owner).insert(note).deliver(
-            MessageDelivery.UNCONSTRAINED_OFFCHAIN,
+            MessageDelivery.OFFCHAIN,
         );
     }
 
@@ -356,7 +356,7 @@ pub contract ApertrueVerifier {
     #[external("public")]
     fn update_merkle_root(new_root: Field, new_tree_size: Field) {
         let admin = self.storage.admin.read();
-        let sender = self.context.msg_sender().unwrap();
+        let sender = self.context.maybe_msg_sender().unwrap();
         assert(sender == admin, "Only admin can update Merkle root");
 
         let current_size = self.storage.tree_size.read();

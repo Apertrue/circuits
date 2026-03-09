@@ -147,8 +147,8 @@ tree_size: {
     /** public_dispatch(selector: field) */
     public_dispatch: ((selector: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** sync_private_state() */
-    sync_private_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** sync_state() */
+    sync_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** update_merkle_root(new_root: field, new_tree_size: field) */
     update_merkle_root: ((new_root: FieldLike, new_tree_size: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
