@@ -595,7 +595,7 @@ fn main(
         // Compute and return the hash for public output
         // IMPORTANT: Use sha256_var to hash only the actual bytes (not padded)
         // This matches what verify_actions_assertion_chain uses internally
-        let hash_result: [u8; 32] = dep::sha256::sha256_var(actions_assertion_bytes, actions_assertion_length as u64);
+        let hash_result: [u8; 32] = dep::sha256::sha256_var(actions_assertion_bytes, actions_assertion_length as u32);
         hash_result
     } else {
         // No actions assertion - return zero hash

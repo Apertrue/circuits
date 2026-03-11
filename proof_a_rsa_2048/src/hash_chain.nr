@@ -75,7 +75,7 @@ pub fn verify_claim_hash(
 ) {
     // Compute SHA256 of the ACTUAL claim bytes (not padded)
     // sha256_var hashes only the first claim_length bytes
-    let computed_hash: [u8; 32] = dep::sha256::sha256_var(claim_bytes, claim_length as u64);
+    let computed_hash: [u8; 32] = dep::sha256::sha256_var(claim_bytes, claim_length as u32);
 
     // Verify match
     for i in 0..32 {
@@ -138,7 +138,7 @@ pub fn verify_assertion_hash(
 ) {
     // Compute SHA256 of the ACTUAL assertion bytes (not padded)
     // sha256_var hashes only the first assertion_length bytes
-    let computed_hash: [u8; 32] = dep::sha256::sha256_var(assertion_bytes, assertion_length as u64);
+    let computed_hash: [u8; 32] = dep::sha256::sha256_var(assertion_bytes, assertion_length as u32);
 
     // Verify match
     for i in 0..32 {
@@ -438,7 +438,7 @@ pub fn verify_actions_assertion_hash(
 ) {
     // Compute SHA256 of the ACTUAL assertion bytes (not padded)
     // sha256_var hashes only the first assertion_length bytes
-    let computed_hash: [u8; 32] = dep::sha256::sha256_var(assertion_bytes, assertion_length as u64);
+    let computed_hash: [u8; 32] = dep::sha256::sha256_var(assertion_bytes, assertion_length as u32);
 
     // Verify match
     for i in 0..32 {

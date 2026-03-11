@@ -1,4 +1,4 @@
-// WebAuthn Account Contract for Aztec
+// WebAuthn Account Contract for Aztec (v4)
 //
 // Tier 1 account security: the passkey hardware IS the signing key.
 // No extractable key material ever exists in JavaScript.
@@ -18,21 +18,16 @@
 // 3. Concatenate authenticatorData || SHA256(clientDataJSON)
 // 4. SHA-256 hash the concatenation to get the signed message
 // 5. Verify ECDSA secp256r1 signature over the signed message
-//
-// Vendored from olehmisar/noir_webauthn v0.37.2, adapted for:
-// - sha256 v0.3.0 (noir-lang/sha256) instead of nodash::sha256
-// - base64 v0.4.2 (noir-lang/noir_base64) instead of v0.4.1
-// - Compatible with Noir 1.0.0-beta.18
 
-use dep::aztec::macros::aztec;
+use ::aztec::macros::aztec;
 
 #[aztec]
 pub contract WebAuthnAccount {
-    use dep::aztec::{
+    use ::aztec::{
         authwit::{account::AccountActions, entrypoint::app::AppPayload},
         context::PrivateContext,
         macros::{
-            functions::{external, initializer, noinitcheck, nophasecheck, view},
+            functions::{allow_phase_change, external, initializer, noinitcheck, view},
             notes::note,
             storage::storage,
         },
@@ -41,11 +36,11 @@ pub contract WebAuthnAccount {
             auth_witness::get_auth_witness,
             notes::{get_sender_for_tags, set_sender_for_tags},
         },
-        protocol_types::traits::{Deserialize, Packable, Serialize},
+        protocol::traits::Packable,
         state_vars::{Owned, PrivateSet, SinglePrivateImmutable},
     };
 
-    use dep::sha256::sha256_var;
+    use ::sha256::sha256_var;
     use std::embedded_curve_ops::EmbeddedCurvePoint;
 
     // Max byte lengths for WebAuthn data
@@ -64,8 +59,8 @@ pub contract WebAuthnAccount {
 
     // P-256 public key stored as an encrypted note.
     // Written once in constructor, read every time the account signs a TX.
-    #[note]
     #[derive(Eq)]
+    #[note]
     pub struct WebAuthnPublicKeyNote {
         x: [u8; 32],
         y: [u8; 32],
@@ -117,7 +112,7 @@ pub contract WebAuthnAccount {
     // SECURITY NOTE: expiry and scope are stored for future enforcement but
     // are NOT currently checked in-circuit (see TODOs in is_valid_impl).
     // Expiry is enforced client-side only. Scope is unused (0 = full access).
-    #[derive(Deserialize, Eq, Packable, Serialize)]
+    #[derive(Eq, Packable)]
     #[note]
     pub struct SessionKeyNote {
         pubkey_x: Field,
@@ -150,7 +145,7 @@ pub contract WebAuthnAccount {
         unsafe { set_sender_for_tags(self.address) };
 
         self.storage.signing_public_key.initialize(pub_key_note).deliver(
-            MessageDelivery.CONSTRAINED_ONCHAIN,
+            MessageDelivery.ONCHAIN_CONSTRAINED,
         );
 
         // Safety: restore original tag sender
@@ -160,7 +155,7 @@ pub contract WebAuthnAccount {
     // Standard account entrypoint: validates auth witness then executes payload
     #[external("private")]
     #[noinitcheck]
-    #[nophasecheck]
+    #[allow_phase_change]
     fn entrypoint(app_payload: AppPayload, fee_payment_method: u8, cancellable: bool) {
         // Safety: sets tag sender for note discovery
         unsafe { set_sender_for_tags(self.address) };
@@ -200,7 +195,7 @@ pub contract WebAuthnAccount {
         let owner = self.context.this_address();
 
         // Revoke all existing session key notes (prevents orphan accumulation)
-        let mut options = dep::aztec::note::note_getter_options::NoteGetterOptions::new();
+        let mut options = ::aztec::note::note_getter_options::NoteGetterOptions::new();
         options = options.set_limit(MAX_SESSION_KEYS);
         let existing = self.storage.session_keys.at(owner).get_notes(options);
         for i in 0..MAX_SESSION_KEYS {
@@ -211,7 +206,7 @@ pub contract WebAuthnAccount {
 
         let note = SessionKeyNote { pubkey_x, pubkey_y, expiry, scope };
         self.storage.session_keys.at(owner).insert(note).deliver(
-            MessageDelivery.CONSTRAINED_ONCHAIN,
+            MessageDelivery.ONCHAIN_CONSTRAINED,
         );
     }
 
@@ -223,7 +218,7 @@ pub contract WebAuthnAccount {
         unsafe { set_sender_for_tags(self.address) };
 
         let owner = self.context.this_address();
-        let mut options = dep::aztec::note::note_getter_options::NoteGetterOptions::new();
+        let mut options = ::aztec::note::note_getter_options::NoteGetterOptions::new();
         options = options.set_limit(MAX_SESSION_KEYS);
         let notes = self.storage.session_keys.at(owner).get_notes(options);
         for i in 0..MAX_SESSION_KEYS {
@@ -334,7 +329,7 @@ pub contract WebAuthnAccount {
             // Use this_address() instead of msg_sender() because is_valid_impl
             // runs in the entrypoint context where msg_sender() is None.
             let this_addr = context.this_address();
-            let mut options = dep::aztec::note::note_getter_options::NoteGetterOptions::new();
+            let mut options = ::aztec::note::note_getter_options::NoteGetterOptions::new();
             options = options.set_limit(MAX_SESSION_KEYS);
             let notes = storage.session_keys.at(this_addr).get_notes(options);
             let mut found = false;
@@ -348,20 +343,9 @@ pub contract WebAuthnAccount {
             }
             assert(found, "Session key not authorized");
 
-            // KNOWN LIMITATION: Expiry is not enforced in-circuit. block_number()
-            // is unavailable in private context (Aztec v3.0.3). Expiry is checked
-            // client-side only. Stolen session keys remain valid until explicitly
-            // revoked via revoke_session_key(). Acceptable for MVP; revisit when
-            // Aztec exposes block number in private.
-            //
-            // KNOWN LIMITATION: Scope is not enforced in-circuit. All scope values
-            // are treated identically (scope=0 means full access). Scoped permissions
-            // require comparing scope against app_payload, which is not accessible
-            // in the entrypoint context. Acceptable for MVP.
-
             // Verify Schnorr signature over the outer_hash
             let pub_key = EmbeddedCurvePoint { x: sk_pubkey_x, y: sk_pubkey_y, is_infinite: false };
-            dep::schnorr::verify_signature(pub_key, sig, message)
+            ::schnorr::verify_signature(pub_key, sig, message)
         } else {
             // ============================================================
             // PATH 0: WebAuthn P-256 (existing path, fields shifted by +1)

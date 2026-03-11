@@ -1,0 +1,14 @@
+[package]
+name = "noir_rsa"
+type = "lib"
+authors = [""]
+compiler_version = ">=1.0.0"
+version = "0.9.1"
+
+[dependencies]
+# Original v0.9.1 deps, only sha512 bumped v0.1.0 -> v0.1.1 to fix
+# std::wrapping_add removal in beta.19 (v0.1.1 uses method syntax instead)
+bignum = { tag = "v0.8.0", git = "https://github.com/noir-lang/noir-bignum" }
+sha256 = { tag = "v0.2.1", git = "https://github.com/noir-lang/sha256" }
+sha512 = { tag = "v0.1.1", git = "https://github.com/zkpassport/sha512" }
+sha1 = { tag = "v0.11", git = "https://github.com/zac-williamson/sha1" }

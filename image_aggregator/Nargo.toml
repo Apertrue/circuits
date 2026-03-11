@@ -6,5 +6,5 @@ compiler_version = ">=1.0.0"
 description = "ImageAggregator: Combines ProofA + ProofB for a single image with linkCommit binding verification"
 
 [dependencies]
-bb_proof_verification = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v3.0.3", directory = "barretenberg/noir/bb_proof_verification" }
+bb_proof_verification = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v4.0.0-devnet.2-patch.3", directory = "barretenberg/noir/bb_proof_verification" }
 poseidon = { tag = "v0.1.1", git = "https://github.com/noir-lang/poseidon" }

@@ -123,8 +123,8 @@ session_keys: {
     /** revoke_session_key(pubkey_x: field, pubkey_y: field) */
     revoke_session_key: ((pubkey_x: FieldLike, pubkey_y: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** sync_private_state() */
-    sync_private_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** sync_state() */
+    sync_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** verify_private_authwit(inner_hash: field) */
     verify_private_authwit: ((inner_hash: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;

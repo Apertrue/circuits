@@ -119,7 +119,7 @@ fn main(
     // ================================================================
     // STEP 2: Verify sig_structure hash matches cose_message_hash
     // ================================================================
-    let computed_sig_hash = sha256_var(sig_structure_bytes, sig_structure_length as u64);
+    let computed_sig_hash = sha256_var(sig_structure_bytes, sig_structure_length as u32);
     assert(computed_sig_hash == cose_message_hash, "Sig_structure hash does not match COSE message hash");
 
     // ================================================================
@@ -136,7 +136,7 @@ fn main(
     // ================================================================
     // STEP 4: Verify claim_hash matches SHA256(claim_bytes)
     // ================================================================
-    let computed_claim_hash = sha256_var(claim_bytes, claim_length as u64);
+    let computed_claim_hash = sha256_var(claim_bytes, claim_length as u32);
     assert(computed_claim_hash == claim_hash, "Claim hash mismatch - claim_bytes integrity violated");
 
     // ================================================================

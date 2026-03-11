@@ -295,7 +295,7 @@ fn main(
         );
         let hash_result: [u8; 32] = dep::sha256::sha256_var(
             actions_assertion_bytes,
-            actions_assertion_length as u64
+            actions_assertion_length as u32
         );
         hash_result
     } else {

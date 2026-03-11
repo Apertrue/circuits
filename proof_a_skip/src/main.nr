@@ -264,7 +264,7 @@ fn main(
             actions_assertion_bytes,
             actions_assertion_length
         );
-        dep::sha256::sha256_var(actions_assertion_bytes, actions_assertion_length as u64)
+        dep::sha256::sha256_var(actions_assertion_bytes, actions_assertion_length as u32)
     } else {
         [0u8; 32]
     };

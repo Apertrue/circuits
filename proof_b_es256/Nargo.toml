@@ -7,7 +7,7 @@ description = "ProofB ES256: ECDSA-only COSE signature verification for algorith
 
 [dependencies]
 # SHA-256 for hash verification (sig_structure, claim hash)
-sha256 = { tag = "v0.2.1", git = "https://github.com/noir-lang/sha256" }
+sha256 = { tag = "v0.3.0", git = "https://github.com/noir-lang/sha256" }
 # Poseidon2 for claim hash commitment verification
 poseidon = { tag = "v0.1.1", git = "https://github.com/noir-lang/poseidon" }
 # NOTE: noir_rsa and bignum NOT included - this circuit only supports ECDSA

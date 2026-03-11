@@ -6,4 +6,6 @@ compiler_version = ">=1.0.0"
 description = "JWT identity verification - proves org membership from Google OAuth JWT without revealing email"
 
 [dependencies]
-noir_jwt = { tag = "v0.5.1", git = "https://github.com/saleel/noir-jwt" }
+# Vendored noir_jwt v0.5.1 with patched deps for beta.19 compatibility:
+# noir_rsa v0.10.0 (sha512 v0.1.1 — no wrapping_add), sha256 v0.3.0, bignum v0.9.2
+noir_jwt = { path = "../vendor/noir-jwt" }

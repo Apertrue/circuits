@@ -142,7 +142,7 @@ fn main(
     // ================================================================
     // STEP 2: Hash the TBS certificate
     // ================================================================
-    let tbs_hash: [u8; 32] = sha256_var(tbs_certificate, tbs_len as u64);
+    let tbs_hash: [u8; 32] = sha256_var(tbs_certificate, tbs_len as u32);
 
     // ================================================================
     // STEP 3: Verify certificate signature (intermediate signed leaf cert)
