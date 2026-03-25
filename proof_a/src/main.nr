@@ -44,6 +44,13 @@ fn main(
     time_min: pub Field,  // Minimum timestamp bound (Unix seconds)
     time_max: pub Field,  // Maximum timestamp bound (Unix seconds)
 
+    // === PUBLIC INPUTS: EDIT TIME RANGE BOUNDS (for edited images) ===
+    // When a photo is edited (e.g., Leica capture -> Lightroom export), the capture
+    // and edit timestamps differ. These bounds constrain the edit/signing timestamp.
+    // Set to 0 when no edit occurred (direct camera capture).
+    edit_time_min: pub Field,  // Minimum edit timestamp bound (0 if no edit)
+    edit_time_max: pub Field,  // Maximum edit timestamp bound (0 if no edit)
+
     // === PUBLIC INPUTS: LOCATION PRIVACY CIRCLE (for graduated location disclosure) ===
     // Verifiers can see the privacy circle region but not exact coordinates
     // Circuit proves: exact location is within the disclosed circle
@@ -187,8 +194,12 @@ fn main(
     //   4. Court verifies: Poseidon(lat, lon, salt) == location_commitment
     //
     location_salt: Field,  // Random salt for location commitment
-    time_salt: Field       // Random salt for time commitment
-) -> pub (Field, Field, Field, [u8; 32]) {  // Returns (link_commit, location_commitment, time_commitment, actions_assertion_hash)
+    time_salt: Field,      // Random salt for time commitment
+
+    // === PRIVATE: EDIT TIMESTAMP & SALT (for separate edit time commitment) ===
+    exact_edit_timestamp: Field,  // Edit/signing timestamp (0 if no edit)
+    edit_time_salt: Field         // Salt for edit time commitment
+) -> pub (Field, Field, Field, Field, [u8; 32]) {  // Returns (link_commit, location_commitment, time_commitment, edit_time_commitment, actions_assertion_hash)
     // ================================================================
     // STEP 0: Verify commitment packing (PUBLIC INPUT OPTIMIZATION)
     // ================================================================
@@ -408,6 +419,22 @@ fn main(
     // Verify exact_timestamp is within the disclosed range
     assert(exact_ts >= min_ts, "Exact timestamp is before disclosed time_min");
     assert(exact_ts <= max_ts, "Exact timestamp is after disclosed time_max");
+
+    // ================================================================
+    // STEP 6b: Edit Time Range Proof (0 = no edit, skip)
+    // ================================================================
+    // When a photo is edited (capture -> export), exact_edit_timestamp is the
+    // signing/export time. For direct camera captures, it's 0 (sentinel).
+    if exact_edit_timestamp != 0 {
+        let edit_ts = exact_edit_timestamp as u64;
+        let edit_min = edit_time_min as u64;
+        let edit_max = edit_time_max as u64;
+        assert(edit_ts >= edit_min, "Edit timestamp before edit_time_min");
+        assert(edit_ts <= edit_max, "Edit timestamp after edit_time_max");
+    } else {
+        assert(edit_time_min == 0, "edit_time_min must be 0 when no edit");
+        assert(edit_time_max == 0, "edit_time_max must be 0 when no edit");
+    }
 
     // ================================================================
     // STEP 7: Location Range Proof (Graduated Location Disclosure)
@@ -642,10 +669,18 @@ fn main(
         2  // input length
     );
 
+    // Edit time commitment: Poseidon2([edit_timestamp, salt]) or 0 sentinel
+    // Poseidon2 never outputs 0 for valid inputs, so 0 is safe as "no edit" sentinel
+    let edit_time_commitment = if exact_edit_timestamp == 0 {
+        0  // Sentinel: no edit happened
+    } else {
+        Poseidon2::hash([exact_edit_timestamp, edit_time_salt], 2)
+    };
+
     // Return link_commit, commitments, and actions hash as public outputs
     // NOTE: link_commit is now computed internally and returned as output
     // The verifier must check that ProofA.link_commit == ProofB.link_commit
-    (link_commit, location_commitment, time_commitment, actions_assertion_hash)
+    (link_commit, location_commitment, time_commitment, edit_time_commitment, actions_assertion_hash)
 }
 
 /// Convert 32 bytes to Field (big-endian)

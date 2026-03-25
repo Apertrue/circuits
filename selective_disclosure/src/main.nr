@@ -19,11 +19,12 @@ global MAX_TREE_DEPTH: u32 = 8;
 /// v2 expansion: Adds location bounding box proofs, time range proofs,
 /// device identity disclosure, and provenance hash disclosure.
 ///
-/// Public inputs (15 total):
+/// Public inputs (17 total):
 ///   root_commitment, nullifier, contract_address,
 ///   disclosed_content_hash, disclosed_trust_list_root, disclosed_proof_timestamp,
 ///   disclosed_lat_min, disclosed_lat_max, disclosed_lon_min, disclosed_lon_max,
 ///   disclosed_location_flags, disclosed_time_min, disclosed_time_max,
+///   disclosed_edit_time_min, disclosed_edit_time_max,
 ///   disclosed_link_commit, disclosed_actions_hash
 fn main(
     // === Public inputs (3 anchoring fields) ===
@@ -43,6 +44,9 @@ fn main(
     // === NEW v2: Time range (0 if hidden) ===
     disclosed_time_min: pub Field,
     disclosed_time_max: pub Field,
+    // === NEW v2: Edit time range (0 if hidden or no edit) ===
+    disclosed_edit_time_min: pub Field,
+    disclosed_edit_time_max: pub Field,
     // === NEW v2: Device and provenance (0 if hidden) ===
     disclosed_link_commit: pub Field,
     disclosed_actions_hash: pub Field,
@@ -65,6 +69,10 @@ fn main(
     // === NEW v2: exact values for time range proof ===
     exact_timestamp: Field,
     time_salt: Field,
+    // === NEW v2: edit time commitment fields ===
+    edit_time_commitment: Field,
+    exact_edit_timestamp: Field,
+    edit_time_salt: Field,
     // === Merkle path (leaf to root) ===
     sibling_path: [Field; MAX_TREE_DEPTH],
     path_indices: [Field; MAX_TREE_DEPTH],
@@ -76,6 +84,7 @@ fn main(
     // === NEW v2: disclosure flags ===
     disclose_location_range: Field,
     disclose_time_range: Field,
+    disclose_edit_time_range: Field,
     disclose_device: Field,
     disclose_actions: Field,
 ) {
@@ -83,13 +92,14 @@ fn main(
     let _ = nullifier;
     let _ = contract_address;
 
-    // --- 1. Recompute image commitment (must match image_aggregator v2) ---
+    // --- 1. Recompute image commitment (must match image_aggregator v3 with edit_time) ---
     let image_commitment = Poseidon2::hash(
         [
             trust_list_root, content_hash, image_nullifier, proof_timestamp,
-            location_commitment, time_commitment, link_commit, actions_hash_field,
+            location_commitment, time_commitment, edit_time_commitment,
+            link_commit, actions_hash_field,
         ],
-        8,
+        9,
     );
 
     // --- 2. Walk Merkle path from leaf to root ---
@@ -140,6 +150,10 @@ fn main(
         "disclose_device must be 0 or 1",
     );
     assert(
+        (disclose_edit_time_range == 0) | (disclose_edit_time_range == 1),
+        "disclose_edit_time_range must be 0 or 1",
+    );
+    assert(
         (disclose_actions == 0) | (disclose_actions == 1),
         "disclose_actions must be 0 or 1",
     );
@@ -179,6 +193,14 @@ fn main(
         computed_time == time_commitment,
         "time_commitment preimage mismatch",
     );
+
+    // --- 7b. Verify edit_time_commitment preimage ---
+    if exact_edit_timestamp != 0 {
+        let computed_edit_time = Poseidon2::hash([exact_edit_timestamp, edit_time_salt], 2);
+        assert(computed_edit_time == edit_time_commitment, "edit_time_commitment preimage mismatch");
+    } else {
+        assert(edit_time_commitment == 0, "edit_time_commitment must be 0 when no edit");
+    }
 
     // --- 8. Location bounding box range proof ---
     // If disclosing location range: verify exact coords fall within disclosed bounds.
@@ -224,6 +246,19 @@ fn main(
         assert(disclosed_time_max == 0, "disclosed_time_max must be 0 when hidden");
     }
 
+    // --- 9b. Edit time range proof ---
+    if disclose_edit_time_range == 1 {
+        assert(exact_edit_timestamp != 0, "Cannot disclose edit time with no edit");
+        let ts = exact_edit_timestamp as u64;
+        let ts_min = disclosed_edit_time_min as u64;
+        let ts_max = disclosed_edit_time_max as u64;
+        assert(ts >= ts_min, "edit timestamp below minimum");
+        assert(ts <= ts_max, "edit timestamp above maximum");
+    } else {
+        assert(disclosed_edit_time_min == 0, "disclosed_edit_time_min must be 0 when hidden");
+        assert(disclosed_edit_time_max == 0, "disclosed_edit_time_max must be 0 when hidden");
+    }
+
     // --- 10. Device identity disclosure ---
     // If disclosing: disclosed value must equal actual link_commit
     // If hidden: disclosed value must be zero
@@ -260,14 +295,16 @@ fn test_single_image_v2_all_disclosed() {
     let proof_timestamp = 0xdef0;
     let location_commitment_val = Poseidon2::hash([100, 200, 0, 1, 999], 5);
     let time_commitment_val = Poseidon2::hash([1706745600, 888], 2);
+    let edit_time_commitment_val = Poseidon2::hash([1709000000, 777], 2);
     let link_commit_val: Field = 0xaaaa;
     let actions_bytes: [Field; 32] = [0; 32];
     let actions_hash_val = Poseidon2::hash(actions_bytes, 32);
 
     let commitment = Poseidon2::hash(
         [trust_list_root, content_hash, image_nullifier, proof_timestamp,
-         location_commitment_val, time_commitment_val, link_commit_val, actions_hash_val],
-        8,
+         location_commitment_val, time_commitment_val, edit_time_commitment_val,
+         link_commit_val, actions_hash_val],
+        9,
     );
 
     main(
@@ -284,6 +321,8 @@ fn test_single_image_v2_all_disclosed() {
         1,                    // disclosed_location_flags
         1706700000,           // disclosed_time_min
         1706800000,           // disclosed_time_max
+        1708900000,           // disclosed_edit_time_min
+        1709100000,           // disclosed_edit_time_max
         link_commit_val,      // disclosed device
         actions_hash_val,     // disclosed actions
         // Private inputs
@@ -302,11 +341,14 @@ fn test_single_image_v2_all_disclosed() {
         999,                  // location_salt
         1706745600,           // exact_timestamp
         888,                  // time_salt
+        edit_time_commitment_val,
+        1709000000,           // exact_edit_timestamp
+        777,                  // edit_time_salt
         [0; MAX_TREE_DEPTH],
         [0; MAX_TREE_DEPTH],
         0,                    // path_depth = 0
         1, 1, 1,             // disclose v1 fields
-        1, 1, 1, 1,          // disclose v2 fields
+        1, 1, 1, 1, 1,       // disclose v2 fields (+ edit_time_range)
     );
 }
 
@@ -318,14 +360,16 @@ fn test_single_image_v2_all_hidden() {
     let proof_timestamp = 0xdef0;
     let location_commitment_val = Poseidon2::hash([100, 200, 0, 1, 999], 5);
     let time_commitment_val = Poseidon2::hash([1706745600, 888], 2);
+    let edit_time_commitment_val: Field = 0;  // no edit
     let link_commit_val: Field = 0xaaaa;
     let actions_bytes: [Field; 32] = [0; 32];
     let actions_hash_val = Poseidon2::hash(actions_bytes, 32);
 
     let commitment = Poseidon2::hash(
         [trust_list_root, content_hash, image_nullifier, proof_timestamp,
-         location_commitment_val, time_commitment_val, link_commit_val, actions_hash_val],
-        8,
+         location_commitment_val, time_commitment_val, edit_time_commitment_val,
+         link_commit_val, actions_hash_val],
+        9,
     );
 
     main(
@@ -335,6 +379,7 @@ fn test_single_image_v2_all_hidden() {
         0, 0, 0,             // all v1 fields hidden
         0, 0, 0, 0, 0,       // all location fields hidden
         0, 0,                 // all time fields hidden
+        0, 0,                 // edit time hidden
         0, 0,                 // device and actions hidden
         // Private inputs
         trust_list_root,
@@ -347,11 +392,13 @@ fn test_single_image_v2_all_hidden() {
         actions_hash_val,
         100, 200, 0, 1, 999,
         1706745600, 888,
+        edit_time_commitment_val,
+        0, 0,                 // no edit timestamp or salt
         [0; MAX_TREE_DEPTH],
         [0; MAX_TREE_DEPTH],
         0,
         0, 0, 0,             // hide v1 fields
-        0, 0, 0, 0,          // hide v2 fields
+        0, 0, 0, 0, 0,       // hide v2 fields (+ edit_time_range)
     );
 }
 
@@ -363,6 +410,7 @@ fn test_two_image_batch_v2() {
     let ts_0 = 0x4444;
     let loc_0 = Poseidon2::hash([100, 200, 0, 0, 111], 5);
     let time_0 = Poseidon2::hash([1706745600, 222], 2);
+    let edit_time_0: Field = 0;  // no edit
     let link_0: Field = 0x5555;
     let act_bytes: [Field; 32] = [0; 32];
     let act_0 = Poseidon2::hash(act_bytes, 32);
@@ -372,11 +420,12 @@ fn test_two_image_batch_v2() {
     let ts_1 = 0x8888;
     let loc_1 = Poseidon2::hash([300, 400, 1, 1, 333], 5);
     let time_1 = Poseidon2::hash([1706800000, 444], 2);
+    let edit_time_1: Field = 0;  // no edit
     let link_1: Field = 0x9999;
     let act_1 = Poseidon2::hash(act_bytes, 32);
 
-    let leaf_0 = Poseidon2::hash([tlr, ch_0, nul_0, ts_0, loc_0, time_0, link_0, act_0], 8);
-    let leaf_1 = Poseidon2::hash([tlr, ch_1, nul_1, ts_1, loc_1, time_1, link_1, act_1], 8);
+    let leaf_0 = Poseidon2::hash([tlr, ch_0, nul_0, ts_0, loc_0, time_0, edit_time_0, link_0, act_0], 9);
+    let leaf_1 = Poseidon2::hash([tlr, ch_1, nul_1, ts_1, loc_1, time_1, edit_time_1, link_1, act_1], 9);
 
     let root = Poseidon2::hash([leaf_0, leaf_1], 2);
 
@@ -392,6 +441,7 @@ fn test_two_image_batch_v2() {
         ts_0,                 // disclose timestamp
         0, 0, 0, 0, 0,       // location hidden
         0, 0,                 // time hidden
+        0, 0,                 // edit time hidden
         link_0,               // disclose device
         0,                    // actions hidden
         // Private inputs
@@ -405,11 +455,13 @@ fn test_two_image_batch_v2() {
         act_0,
         100, 200, 0, 0, 111,
         1706745600, 222,
+        edit_time_0,
+        0, 0,                 // no edit timestamp or salt
         siblings,
         [0; MAX_TREE_DEPTH],
         1,
         1, 1, 1,             // disclose v1
-        0, 0, 1, 0,          // only disclose device
+        0, 0, 0, 1, 0,       // only disclose device (+ edit_time_range slot)
     );
 }
 
@@ -421,6 +473,7 @@ fn test_wrong_root_fails_v2() {
     let proof_timestamp = 0xdef0;
     let loc = Poseidon2::hash([100, 200, 0, 1, 999], 5);
     let time = Poseidon2::hash([1706745600, 888], 2);
+    let edit_time: Field = 0;
     let link: Field = 0xaaaa;
     let act_bytes: [Field; 32] = [0; 32];
     let act = Poseidon2::hash(act_bytes, 32);
@@ -432,6 +485,7 @@ fn test_wrong_root_fails_v2() {
         0, 0, 0,
         0, 0, 0, 0, 0,
         0, 0,
+        0, 0,                 // edit time hidden
         0, 0,
         trust_list_root,
         content_hash,
@@ -440,11 +494,12 @@ fn test_wrong_root_fails_v2() {
         loc, time, link, act,
         100, 200, 0, 1, 999,
         1706745600, 888,
+        edit_time, 0, 0,
         [0; MAX_TREE_DEPTH],
         [0; MAX_TREE_DEPTH],
         0,
         0, 0, 0,
-        0, 0, 0, 0,
+        0, 0, 0, 0, 0,
     );
 }
 
@@ -456,13 +511,14 @@ fn test_location_out_of_range_fails() {
     let proof_timestamp = 0xdef0;
     let loc = Poseidon2::hash([500, 200, 0, 1, 999], 5);
     let time = Poseidon2::hash([1706745600, 888], 2);
+    let edit_time: Field = 0;
     let link: Field = 0xaaaa;
     let act_bytes: [Field; 32] = [0; 32];
     let act = Poseidon2::hash(act_bytes, 32);
 
     let commitment = Poseidon2::hash(
-        [trust_list_root, content_hash, image_nullifier, proof_timestamp, loc, time, link, act],
-        8,
+        [trust_list_root, content_hash, image_nullifier, proof_timestamp, loc, time, edit_time, link, act],
+        9,
     );
 
     main(
@@ -474,6 +530,7 @@ fn test_location_out_of_range_fails() {
         200,                  // lat_max = 200 (actual lat is 500 -- OUT OF RANGE)
         0, 0, 0,
         0, 0,
+        0, 0,                 // edit time hidden
         0, 0,
         trust_list_root,
         content_hash,
@@ -482,11 +539,12 @@ fn test_location_out_of_range_fails() {
         loc, time, link, act,
         500, 200, 0, 1, 999,  // exact_lat = 500
         1706745600, 888,
+        edit_time, 0, 0,
         [0; MAX_TREE_DEPTH],
         [0; MAX_TREE_DEPTH],
         0,
         0, 0, 0,
-        1, 0, 0, 0,          // disclose_location_range = 1
+        1, 0, 0, 0, 0,       // disclose_location_range = 1
     );
 }
 
@@ -498,13 +556,14 @@ fn test_time_out_of_range_fails() {
     let proof_timestamp = 0xdef0;
     let loc = Poseidon2::hash([100, 200, 0, 1, 999], 5);
     let time = Poseidon2::hash([1706745600, 888], 2);
+    let edit_time: Field = 0;
     let link: Field = 0xaaaa;
     let act_bytes: [Field; 32] = [0; 32];
     let act = Poseidon2::hash(act_bytes, 32);
 
     let commitment = Poseidon2::hash(
-        [trust_list_root, content_hash, image_nullifier, proof_timestamp, loc, time, link, act],
-        8,
+        [trust_list_root, content_hash, image_nullifier, proof_timestamp, loc, time, edit_time, link, act],
+        9,
     );
 
     main(
@@ -515,6 +574,7 @@ fn test_time_out_of_range_fails() {
         0, 0, 0, 0, 0,
         1706700000,           // time_min
         1706710000,           // time_max (actual is 1706745600 -- OUT OF RANGE)
+        0, 0,                 // edit time hidden
         0, 0,
         trust_list_root,
         content_hash,
@@ -523,11 +583,12 @@ fn test_time_out_of_range_fails() {
         loc, time, link, act,
         100, 200, 0, 1, 999,
         1706745600, 888,
+        edit_time, 0, 0,
         [0; MAX_TREE_DEPTH],
         [0; MAX_TREE_DEPTH],
         0,
         0, 0, 0,
-        0, 1, 0, 0,          // disclose_time_range = 1
+        0, 1, 0, 0, 0,       // disclose_time_range = 1
     );
 }
 
@@ -539,13 +600,14 @@ fn test_wrong_device_disclosure_fails() {
     let proof_timestamp = 0xdef0;
     let loc = Poseidon2::hash([100, 200, 0, 1, 999], 5);
     let time = Poseidon2::hash([1706745600, 888], 2);
+    let edit_time: Field = 0;
     let link: Field = 0xaaaa;
     let act_bytes: [Field; 32] = [0; 32];
     let act = Poseidon2::hash(act_bytes, 32);
 
     let commitment = Poseidon2::hash(
-        [trust_list_root, content_hash, image_nullifier, proof_timestamp, loc, time, link, act],
-        8,
+        [trust_list_root, content_hash, image_nullifier, proof_timestamp, loc, time, edit_time, link, act],
+        9,
     );
 
     main(
@@ -555,6 +617,7 @@ fn test_wrong_device_disclosure_fails() {
         0, 0, 0,
         0, 0, 0, 0, 0,
         0, 0,
+        0, 0,                 // edit time hidden
         0xbbbb,               // wrong link_commit disclosed
         0,
         trust_list_root,
@@ -564,10 +627,11 @@ fn test_wrong_device_disclosure_fails() {
         loc, time, link, act,
         100, 200, 0, 1, 999,
         1706745600, 888,
+        edit_time, 0, 0,
         [0; MAX_TREE_DEPTH],
         [0; MAX_TREE_DEPTH],
         0,
         0, 0, 0,
-        0, 0, 1, 0,          // disclose_device = 1
+        0, 0, 0, 1, 0,       // disclose_device = 1
     );
 }

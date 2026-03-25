@@ -14,18 +14,19 @@
 // - Preserves nullifier for replay prevention
 //
 // IMPORTANT: verify_honk_proof requires ALL public inputs+outputs from the inner proof.
-// ProofA has 50 public values (15 inputs + 35 outputs), ProofB has 9 public values (8 inputs + 1 output).
+// ProofA has 53 public values (17 inputs + 36 outputs), ProofB has 9 public values (8 inputs + 1 output).
 //
-// Public values layout (9 total = 4 inputs + 5 outputs):
+// Public values layout (10 total = 4 inputs + 6 outputs):
 // [0] trust_list_root (input)
 // [1] content_hash (input)
 // [2] nullifier (input)
 // [3] proof_timestamp (input)
 // [4] location_commitment (output)
 // [5] time_commitment (output)
-// [6] link_commit (output)
-// [7] actions_hash_field (output)
-// [8] image_commitment (output)
+// [6] edit_time_commitment (output)
+// [7] link_commit (output)
+// [8] actions_hash_field (output)
+// [9] image_commitment (output)
 //
 // Estimated constraints: ~100k (2x verify_proof + Poseidon hash)
 
@@ -37,9 +38,9 @@ use dep::bb_proof_verification::{
 use dep::poseidon::poseidon2::Poseidon2;
 
 // Number of public values for each proof (inputs + outputs)
-// ProofA: 15 inputs + 35 outputs = 50 (after public input packing optimization)
+// ProofA: 17 inputs + 36 outputs = 53 (after public input packing + edit time)
 // ProofB: 8 inputs + 1 output = 9 (added claim_hash_commitment)
-global PROOF_A_PUBLIC_VALUES: u32 = 50;
+global PROOF_A_PUBLIC_VALUES: u32 = 53;
 global PROOF_B_PUBLIC_VALUES: u32 = 9;
 
 // Main entry point for ImageAggregator
@@ -56,10 +57,12 @@ global PROOF_B_PUBLIC_VALUES: u32 = 9;
 // PUBLIC OUTPUTS:
 // - location_commitment: Poseidon2 commitment to exact GPS + salt (from ProofA)
 // - time_commitment: Poseidon2 commitment to exact timestamp + salt (from ProofA)
+// - edit_time_commitment: Poseidon2 commitment to exact edit timestamp + salt (from ProofA, 0 if no edit)
 // - link_commit: Device identity binding (Pedersen hash from ProofA)
 // - actions_hash_field: Poseidon2 reduction of C2PA actions SHA-256 hash (from ProofA)
 // - image_commitment: Poseidon2([trust_list_root, content_hash, nullifier, proof_timestamp,
-//                                location_commitment, time_commitment, link_commit, actions_hash_field])
+//                                location_commitment, time_commitment, edit_time_commitment,
+//                                link_commit, actions_hash_field])
 fn main(
     // === PUBLIC INPUTS (must match shared fields in ProofA/ProofB) ===
     trust_list_root: pub Field,
@@ -77,10 +80,10 @@ fn main(
     vk_a_hash: Field,
     vk_b_hash: Field,
 
-    // === PRIVATE INPUTS: ALL PROOF_A PUBLIC VALUES (50 total) ===
+    // === PRIVATE INPUTS: ALL PROOF_A PUBLIC VALUES (53 total) ===
     // These must be passed to verify_honk_proof in exact order
     //
-    // ProofA PUBLIC INPUTS (15 total, after packing optimization):
+    // ProofA PUBLIC INPUTS (17 total, after packing optimization + edit time):
     // [0] trust_list_root: Field
     // [1] content_hash: Field
     // [2] nullifier: Field
@@ -89,20 +92,23 @@ fn main(
     // [5] cert_not_after: Field
     // [6] time_min: Field
     // [7] time_max: Field
-    // [8] center_lat_scaled: Field
-    // [9] center_lon_scaled: Field
-    // [10] location_flags: Field (u8 as Field, bit 0=lat neg, bit 1=lon neg)
-    // [11] radius_squared_scaled: Field
-    // [12] tbs_hash_commitment: Field (Poseidon2 of TBS hash bytes)
-    // [13] claim_hash_commitment: Field (Poseidon2 of claim hash bytes)
-    // [14] content_hash_offset: Field (u32 as Field)
+    // [8] edit_time_min: Field
+    // [9] edit_time_max: Field
+    // [10] center_lat_scaled: Field
+    // [11] center_lon_scaled: Field
+    // [12] location_flags: Field (u8 as Field, bit 0=lat neg, bit 1=lon neg)
+    // [13] radius_squared_scaled: Field
+    // [14] tbs_hash_commitment: Field (Poseidon2 of TBS hash bytes)
+    // [15] claim_hash_commitment: Field (Poseidon2 of claim hash bytes)
+    // [16] content_hash_offset: Field (u32 as Field)
     //
-    // ProofA PUBLIC OUTPUTS (35 total):
-    // [15] link_commit: Field
-    // [16] location_commitment: Field
-    // [17] time_commitment: Field
-    // [18..50] actions_assertion_hash: [Field; 32] (u8 as Field)
-    proof_a_public_values: [Field; 50],
+    // ProofA PUBLIC OUTPUTS (36 total):
+    // [17] link_commit: Field
+    // [18] location_commitment: Field
+    // [19] time_commitment: Field
+    // [20] edit_time_commitment: Field
+    // [21..53] actions_assertion_hash: [Field; 32] (u8 as Field)
+    proof_a_public_values: [Field; 53],
 
     // === PRIVATE INPUTS: ALL PROOF_B PUBLIC VALUES (9 total) ===
     //
@@ -119,7 +125,7 @@ fn main(
     // ProofB PUBLIC OUTPUT (1 total):
     // [8] link_commit: Field
     proof_b_public_values: [Field; 9],
-) -> pub (Field, Field, Field, Field, Field) {
+) -> pub (Field, Field, Field, Field, Field, Field) {
     // ================================================================
     // STEP 1: Verify ProofA (certificate chain verification)
     // ================================================================
@@ -165,11 +171,11 @@ fn main(
     );
 
     // SECURITY: Verify claim_hash_commitment matches between proofs
-    // ProofA claim_hash_commitment is at index 13
+    // ProofA claim_hash_commitment is at index 15 (shifted +2 for edit_time_min/max)
     // ProofB claim_hash_commitment is at index 6
     // This ensures both proofs reference the same signed C2PA claim
     assert(
-        proof_a_public_values[13] == proof_b_public_values[6],
+        proof_a_public_values[15] == proof_b_public_values[6],
         "claim_hash_commitment mismatch between ProofA and ProofB"
     );
 
@@ -197,9 +203,9 @@ fn main(
     // SECURITY: This prevents proof substitution attacks where an attacker
     // could mix ProofA from image A with ProofB from image B.
     //
-    // ProofA link_commit is at index 15 (first output after 15 inputs)
+    // ProofA link_commit is at index 17 (first output after 17 inputs)
     // ProofB link_commit is at index 8 (first output after 8 inputs)
-    let link_commit_a = proof_a_public_values[15];
+    let link_commit_a = proof_a_public_values[17];
     let link_commit_b = proof_b_public_values[8];
 
     assert(
@@ -210,17 +216,18 @@ fn main(
     // ================================================================
     // STEP 5: Extract ProofA commitment outputs
     // ================================================================
-    // ProofA outputs at indices 15-17 are commitment fields:
-    // [15] link_commit, [16] location_commitment, [17] time_commitment
-    let link_commit = proof_a_public_values[15];
-    let location_commitment = proof_a_public_values[16];
-    let time_commitment = proof_a_public_values[17];
+    // ProofA outputs at indices 17-20 are commitment fields:
+    // [17] link_commit, [18] location_commitment, [19] time_commitment, [20] edit_time_commitment
+    let link_commit = proof_a_public_values[17];
+    let location_commitment = proof_a_public_values[18];
+    let time_commitment = proof_a_public_values[19];
+    let edit_time_commitment = proof_a_public_values[20];
 
-    // ProofA outputs at indices 18-49 are actions_assertion_hash [u8; 32] as Fields.
+    // ProofA outputs at indices 21-52 are actions_assertion_hash [u8; 32] as Fields.
     // Reduce to a single Field via Poseidon2 for inclusion in image_commitment.
     let mut actions_bytes: [Field; 32] = [0; 32];
     for i in 0..32 {
-        actions_bytes[i] = proof_a_public_values[18 + i];
+        actions_bytes[i] = proof_a_public_values[21 + i];
     }
     let actions_hash_field = Poseidon2::hash(actions_bytes, 32);
 
@@ -228,16 +235,17 @@ fn main(
     // STEP 6: Compute image_commitment for tree aggregation
     // ================================================================
     // This commitment uniquely identifies this verified image in the aggregation tree.
-    // Expanded from 4 to 8 inputs to include all ProofA commitment outputs.
+    // Expanded from 8 to 9 inputs to include edit_time_commitment.
     let image_commitment = Poseidon2::hash(
         [
             trust_list_root, content_hash, nullifier, proof_timestamp,
-            location_commitment, time_commitment, link_commit, actions_hash_field,
+            location_commitment, time_commitment, edit_time_commitment,
+            link_commit, actions_hash_field,
         ],
-        8,
+        9,
     );
 
-    (location_commitment, time_commitment, link_commit, actions_hash_field, image_commitment)
+    (location_commitment, time_commitment, edit_time_commitment, link_commit, actions_hash_field, image_commitment)
 }
 
 // ====================================================================
@@ -252,18 +260,21 @@ fn test_image_commitment_deterministic() {
     let proof_timestamp: Field = 1706745600;
     let location_commitment: Field = 55555555555555555555;
     let time_commitment: Field = 66666666666666666666;
+    let edit_time_commitment: Field = 44444444444444444444;
     let link_commit: Field = 77777777777777777777;
     let actions_hash_field: Field = 88888888888888888888;
 
     let commit1 = Poseidon2::hash(
         [trust_list_root, content_hash, nullifier, proof_timestamp,
-         location_commitment, time_commitment, link_commit, actions_hash_field],
-        8,
+         location_commitment, time_commitment, edit_time_commitment,
+         link_commit, actions_hash_field],
+        9,
     );
     let commit2 = Poseidon2::hash(
         [trust_list_root, content_hash, nullifier, proof_timestamp,
-         location_commitment, time_commitment, link_commit, actions_hash_field],
-        8,
+         location_commitment, time_commitment, edit_time_commitment,
+         link_commit, actions_hash_field],
+        9,
     );
 
     assert(commit1 == commit2, "Image commitment should be deterministic");
@@ -278,16 +289,17 @@ fn test_different_inputs_different_commitment() {
     let timestamp: Field = 1706745600;
     let loc: Field = 55555555555555555555;
     let time: Field = 66666666666666666666;
+    let edit_time: Field = 0;
     let link: Field = 77777777777777777777;
     let actions: Field = 88888888888888888888;
 
     let commit1 = Poseidon2::hash(
-        [trust_list_root, content_hash1, nullifier, timestamp, loc, time, link, actions],
-        8,
+        [trust_list_root, content_hash1, nullifier, timestamp, loc, time, edit_time, link, actions],
+        9,
     );
     let commit2 = Poseidon2::hash(
-        [trust_list_root, content_hash2, nullifier, timestamp, loc, time, link, actions],
-        8,
+        [trust_list_root, content_hash2, nullifier, timestamp, loc, time, edit_time, link, actions],
+        9,
     );
 
     assert(commit1 != commit2, "Different content_hash should produce different commitment");

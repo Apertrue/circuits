@@ -18,20 +18,21 @@
 //                                                      |
 // Level 3:                                      [FINAL_PROOF]
 //
-// IMPORTANT: At level 0, we verify ImageAggregator proofs which have 9 public values:
+// IMPORTANT: At level 0, we verify ImageAggregator proofs which have 10 public values:
 // [trust_list_root, content_hash, nullifier, proof_timestamp,
-//  location_commitment, time_commitment, link_commit, actions_hash_field, image_commitment]
-// At level 1+, we verify TreeAggregator proofs which also have 9 public values:
-// [0, 0, 0, 0, 0, 0, 0, 0, combined_commitment]  (padded to match ImageAggregator layout)
+//  location_commitment, time_commitment, edit_time_commitment,
+//  link_commit, actions_hash_field, image_commitment]
+// At level 1+, we verify TreeAggregator proofs which also have 10 public values:
+// [0, 0, 0, 0, 0, 0, 0, 0, 0, combined_commitment]  (padded to match ImageAggregator layout)
 //
 // At each level, TreeAggregator:
 // 1. Verifies left child proof
 // 2. Verifies right child proof
 // 3. Combines their commitments into a new combined_commitment
 //
-// Public values layout (9 total = 8 padding inputs + 1 output):
-// [0..7] padding (must be zero) -- matches ImageAggregator's 4 inputs + 4 commitment outputs
-// [8]    combined_commitment (output)
+// Public values layout (10 total = 9 padding inputs + 1 output):
+// [0..8] padding (must be zero) -- matches ImageAggregator's 4 inputs + 5 commitment outputs
+// [9]    combined_commitment (output)
 //
 // Estimated constraints: ~50k (2x verify_proof + Poseidon hash)
 
@@ -42,14 +43,14 @@ use dep::bb_proof_verification::{
 };
 use dep::poseidon::poseidon2::Poseidon2;
 
-// Number of public values for ImageAggregator (4 inputs + 5 outputs)
-global IMAGE_AGG_PUBLIC_VALUES: u32 = 9;
+// Number of public values for ImageAggregator (4 inputs + 6 outputs)
+global IMAGE_AGG_PUBLIC_VALUES: u32 = 10;
 
 // Main entry point for TreeAggregator
 //
-// PUBLIC INPUTS (8 padding fields, forced to zero):
-// - pad_0..pad_7: Must be zero. These exist so TreeAggregator has 9 public
-//   values (8 inputs + 1 return) matching ImageAggregator's layout. This
+// PUBLIC INPUTS (9 padding fields, forced to zero):
+// - pad_0..pad_8: Must be zero. These exist so TreeAggregator has 10 public
+//   values (9 inputs + 1 return) matching ImageAggregator's layout. This
 //   ensures verify_honk_proof works identically at every tree level.
 //
 // PRIVATE INPUTS:
@@ -63,8 +64,8 @@ global IMAGE_AGG_PUBLIC_VALUES: u32 = 9;
 // - public_values_right: All public values from right child proof (9 values)
 //
 // PUBLIC OUTPUT:
-// - Returns the combined_commitment at index 8
-//   Public values layout: [0, 0, 0, 0, 0, 0, 0, 0, combined_commitment]
+// - Returns the combined_commitment at index 9
+//   Public values layout: [0, 0, 0, 0, 0, 0, 0, 0, 0, combined_commitment]
 fn main(
     // === PUBLIC INPUTS (padding - must be zero) ===
     pad_0: pub Field,
@@ -75,6 +76,7 @@ fn main(
     pad_5: pub Field,
     pad_6: pub Field,
     pad_7: pub Field,
+    pad_8: pub Field,
 
     // === PRIVATE INPUTS ===
     combined_commitment: Field,
@@ -92,20 +94,21 @@ fn main(
     vk_hash_right: Field,
 
     // === PRIVATE INPUTS: ALL PUBLIC VALUES FROM CHILD PROOFS ===
-    // For ImageAggregator proofs (level 0): 9 values each
+    // For ImageAggregator proofs (level 0): 10 values each
     // [0] trust_list_root
     // [1] content_hash
     // [2] nullifier
     // [3] proof_timestamp
     // [4] location_commitment
     // [5] time_commitment
-    // [6] link_commit
-    // [7] actions_hash_field
-    // [8] image_commitment (the output we care about)
+    // [6] edit_time_commitment
+    // [7] link_commit
+    // [8] actions_hash_field
+    // [9] image_commitment (the output we care about)
     //
-    // For TreeAggregator proofs (level 1+): [0, 0, 0, 0, 0, 0, 0, 0, combined_commitment]
-    public_values_left: [Field; 9],
-    public_values_right: [Field; 9],
+    // For TreeAggregator proofs (level 1+): [0, 0, 0, 0, 0, 0, 0, 0, 0, combined_commitment]
+    public_values_left: [Field; 10],
+    public_values_right: [Field; 10],
 ) -> pub Field {
     // ================================================================
     // STEP 0: Enforce padding fields are zero
@@ -118,6 +121,7 @@ fn main(
     assert(pad_5 == 0, "pad_5 must be zero");
     assert(pad_6 == 0, "pad_6 must be zero");
     assert(pad_7 == 0, "pad_7 must be zero");
+    assert(pad_8 == 0, "pad_8 must be zero");
 
     // ================================================================
     // STEP 1: Verify left child proof
@@ -145,10 +149,10 @@ fn main(
     // STEP 3: Compute and verify combined commitment
     // ================================================================
     // The commitment is always the LAST value in the public values array
-    // For ImageAggregator: index 8 (image_commitment)
-    // For TreeAggregator: index 8 (combined_commitment, padded to position 8)
-    let commitment_left = public_values_left[8];
-    let commitment_right = public_values_right[8];
+    // For ImageAggregator: index 9 (image_commitment)
+    // For TreeAggregator: index 9 (combined_commitment, padded to position 9)
+    let commitment_left = public_values_left[9];
+    let commitment_right = public_values_right[9];
 
     // The combined commitment is the Poseidon hash of both child commitments.
     // This creates a Merkle-like structure where the root commitment
@@ -213,19 +217,20 @@ fn test_different_children_different_commitment() {
 
 #[test]
 fn test_commitment_index_location() {
-    // Verify that commitment is correctly extracted from index 8
-    let public_values: [Field; 9] = [
+    // Verify that commitment is correctly extracted from index 9
+    let public_values: [Field; 10] = [
         111, // trust_list_root
         222, // content_hash
         333, // nullifier
         444, // proof_timestamp
         555, // location_commitment
         666, // time_commitment
-        777, // link_commit
-        888, // actions_hash_field
-        999, // image_commitment (this is what we use)
+        777, // edit_time_commitment
+        888, // link_commit
+        999, // actions_hash_field
+        1010, // image_commitment (this is what we use)
     ];
 
-    let commitment = public_values[8];
-    assert(commitment == 999, "Commitment should be at index 8");
+    let commitment = public_values[9];
+    assert(commitment == 1010, "Commitment should be at index 9");
 }
