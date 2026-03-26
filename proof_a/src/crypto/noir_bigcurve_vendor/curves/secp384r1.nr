@@ -127,13 +127,10 @@ mod test {
         assert(result.is_infinity);
     }
 
-    #[test(should_fail)]
-    unconstrained fn verify_offset_generators() {
-        // Secp384r1 cofactor is 1
-        // crate::crypto::noir_bigcurve_vendor::utils::derive_offset_generators::verify_offset_generators::<Secp384r1_Fq, Secp384r1>(
-        //     1,
-        // );
-    }
+    // verify_offset_generators test removed — body was commented out and
+    // #[test(should_fail)] on an empty fn causes CI failure (test passes
+    // when it should fail).  The actual offset generator verification is
+    // not applicable for Secp384r1 (cofactor = 1).
 
     #[test]
     unconstrained fn test_scalar_field_conversion(seed: [u8; 10]) {
