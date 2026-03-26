@@ -156,8 +156,8 @@ pub contract ApertrueVerifier {
     //   proof             - 500-field UltraHonkZK proof from tree aggregator
     //   vk                - 115-field verification key for tree aggregator circuit
     //   vk_hash           - Hash of VK (checked against stored immutable hash)
-    //   public_values     - 9 public values from tree aggregator:
-    //                        [0, 0, 0, 0, 0, 0, 0, 0, root_commitment]
+    //   public_values     - 10 public values from tree aggregator:
+    //                        [0, 0, 0, 0, 0, 0, 0, 0, 0, root_commitment]
     //   image_count       - Number of images in the batch
     //   trust_list_root   - Trust list root used during proving
     //   epoch_week        - ISO week number for coarse timing
@@ -169,7 +169,7 @@ pub contract ApertrueVerifier {
         proof: UltraHonkZKProof,
         vk: UltraHonkVerificationKey,
         vk_hash: Field,
-        public_values: [Field; 9],
+        public_values: [Field; 10],
         image_count: Field,
         trust_list_root: Field,
         epoch_week: Field,
@@ -182,7 +182,7 @@ pub contract ApertrueVerifier {
         assert(trust_list_root != 0, "trust_list_root must not be zero");
         assert(!owner.is_zero(), "owner must not be zero address");
 
-        // Verify tree aggregator padding: public_values[0..8] must be zero
+        // Verify tree aggregator padding: public_values[0..9] must be zero
         assert(public_values[0] == 0, "public_values padding [0] must be zero");
         assert(public_values[1] == 0, "public_values padding [1] must be zero");
         assert(public_values[2] == 0, "public_values padding [2] must be zero");
@@ -191,7 +191,8 @@ pub contract ApertrueVerifier {
         assert(public_values[5] == 0, "public_values padding [5] must be zero");
         assert(public_values[6] == 0, "public_values padding [6] must be zero");
         assert(public_values[7] == 0, "public_values padding [7] must be zero");
-        assert(public_values[8] != 0, "root_commitment must not be zero");
+        assert(public_values[8] == 0, "public_values padding [8] must be zero");
+        assert(public_values[9] != 0, "root_commitment must not be zero");
 
         // ============================================================
         // VK HASH CHECK (private historical read of PublicImmutable)
@@ -207,9 +208,9 @@ pub contract ApertrueVerifier {
 
         // ============================================================
         // STEP 2: Extract root_commitment from public values
-        // Tree aggregator output: [0, 0, 0, 0, 0, 0, 0, 0, root_commitment]
+        // Tree aggregator output: [0, 0, 0, 0, 0, 0, 0, 0, 0, root_commitment]
         // ============================================================
-        let root_commitment = public_values[8];
+        let root_commitment = public_values[9];
 
         // Replay prevention: derive nullifier from root_commitment
         // so the same batch cannot be verified twice
