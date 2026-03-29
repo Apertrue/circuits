@@ -322,7 +322,7 @@ fn test_single_image_v2_all_disclosed() {
         150,                  // disclosed_lat_max
         100,                  // disclosed_lon_min
         300,                  // disclosed_lon_max
-        1,                    // disclosed_location_flags
+        2,                    // disclosed_location_flags (bit0=lat_neg=0, bit1=lon_neg=1)
         1706700000,           // disclosed_time_min
         1706800000,           // disclosed_time_max
         1708900000,           // disclosed_edit_time_min
