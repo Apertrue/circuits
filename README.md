@@ -137,7 +137,7 @@ The build script runs `bb-avm aztec_process` in Docker for AVM transpilation and
 | `poseidon` | 0.1.1 | ZK-friendly Poseidon hash for commitments |
 | `bb_proof_verification` | 4.0.0-devnet.2-patch.3 | Recursive proof verification (aggregation) |
 
-The `noir_rsa` dependency uses [zkpassport's fork](https://github.com/zkpassport/noir_rsa) which adds RSA-PSS support required for Adobe and ChatGPT-signed images.
+The `noir_rsa` dependency uses [zkpassport's fork](https://github.com/zkpassport/noir_rsa) which adds RSA-PSS support required for Adobe and ChatGPT-signed images. Vendored snapshots under `vendor/` may use separately pinned versions for compatibility reasons (see `vendor/noir-rsa/VENDORED_FROM.md`).
 
 ## Security Model
 
