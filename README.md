@@ -33,9 +33,10 @@ Apertrue uses a **split-proof architecture** that separates verification into tw
                     │ Image Aggregator │──── Both proofs bound to same content
                     └────────┬────────┘
                              │
+                    ┌────────▼────────┐
   C2PA Image ──────▶│   ProofB         │──── COSE signature valid,
                     │   (3 variants)   │     issuer in trust list
-                    └─────────────────┘
+                    └────────┬────────┘
                              │
                     ┌────────▼────────┐
                     │ Tree Aggregator  │──── Batch N images into 1 proof
