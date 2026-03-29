@@ -127,7 +127,7 @@ mod test {
         assert(result.is_infinity);
     }
 
-    // verify_offset_generators test removed — body was commented out and
+    // verify_offset_generators test removed -- body was commented out and
     // #[test(should_fail)] on an empty fn causes CI failure (test passes
     // when it should fail).  The actual offset generator verification is
     // not applicable for Secp384r1 (cofactor = 1).
