@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License" />
   <img src="https://img.shields.io/badge/noir-1.0.0--beta.19-blueviolet" alt="Noir" />
-  <img src="https://img.shields.io/badge/circuits-15-green" alt="Circuits" />
+  <img src="https://img.shields.io/badge/circuits-16-green" alt="Circuits" />
   <img src="https://img.shields.io/badge/contracts-2-green" alt="Contracts" />
 </p>
 
@@ -26,7 +26,7 @@ Apertrue uses a **split-proof architecture** that separates verification into tw
 ```
                     ┌─────────────────┐
   C2PA Image ──────▶│   ProofA         │──── Certificate chain valid
-                    │   (5 variants)   │
+                    │   (6 variants)   │
                     └────────┬────────┘
                              │
                     ┌────────▼────────┐
@@ -49,7 +49,8 @@ Apertrue uses a **split-proof architecture** that separates verification into tw
 
 | Circuit | Algorithm | What It Proves |
 |---------|-----------|----------------|
-| `proof_a_rsa_2048` | RSA-2048 + SHA-256 | X.509 certificate chain signature is valid |
+| `proof_a` | Multi-algorithm | X.509 certificate chain signature is valid (supports all key types) |
+| `proof_a_rsa_2048` | RSA-2048 + SHA-256 | Same, optimised for 2048-bit RSA keys |
 | `proof_a_rsa_4096` | RSA-4096 + SHA-256 | Same, for 4096-bit keys (Adobe, ChatGPT) |
 | `proof_a_ecdsa_p256` | ECDSA secp256r1 | Same, for P-256 curves (Google Pixel) |
 | `proof_a_ecdsa_p384` | ECDSA secp384r1 | Same, for P-384 curves |
@@ -107,7 +108,7 @@ Both target [Aztec Network](https://aztec.network/) v4 devnet.
 cd proof_a_rsa_2048
 nargo compile
 
-# All circuits (from monorepo root)
+# All circuits (from repo root)
 ./scripts/build-all-circuits.sh
 ```
 
