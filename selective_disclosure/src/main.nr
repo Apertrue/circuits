@@ -220,10 +220,12 @@ fn main(
         assert(lon <= lon_max, "longitude above maximum bound");
 
         // Verify sign bits match actual signs
-        // disclosed_location_flags encodes: bit0 = lat_min_neg, bit1 = lat_max_neg,
-        //                                   bit2 = lon_min_neg, bit3 = lon_max_neg
-        // The exact sign must be consistent with the bounding box signs.
-        // (If exact lat is negative, it must be within negative bounds)
+        // disclosed_location_flags encodes: bit0 = lat_neg, bit1 = lon_neg
+        // The exact coordinate signs must match the disclosed signs.
+        let disclosed_lat_neg = disclosed_location_flags & 1;
+        let disclosed_lon_neg = (disclosed_location_flags >> 1) & 1;
+        assert(disclosed_lat_neg == exact_lat_is_negative, "disclosed latitude sign does not match exact latitude sign");
+        assert(disclosed_lon_neg == exact_lon_is_negative, "disclosed longitude sign does not match exact longitude sign");
     } else {
         // When not disclosing: all location public inputs must be zero
         assert(disclosed_lat_min == 0, "disclosed_lat_min must be 0 when hidden");
