@@ -38,8 +38,9 @@ time_max = "1737158400"
 # London area: 51.5074 N, 0.1278 W with 10km radius
 center_lat_scaled = "515074000"
 center_lon_scaled = "1278000"
-center_lat_is_negative = "0"
-center_lon_is_negative = "1"
+# location_flags: bit 0 = lat negative (South), bit 1 = lon negative (West)
+# 0b10 = lat positive (N), lon negative (W) = London
+location_flags = "2"
 radius_squared_scaled = "806962652721" # ~10km radius squared (corrected)
 
 # === EXACT TIMESTAMP (private) ===

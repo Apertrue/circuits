@@ -220,10 +220,14 @@ fn main(
         assert(lon <= lon_max, "longitude above maximum bound");
 
         // Verify sign bits match actual signs
-        // disclosed_location_flags encodes: bit0 = lat_min_neg, bit1 = lat_max_neg,
-        //                                   bit2 = lon_min_neg, bit3 = lon_max_neg
-        // The exact sign must be consistent with the bounding box signs.
-        // (If exact lat is negative, it must be within negative bounds)
+        // disclosed_location_flags encodes: bit0 = lat_neg, bit1 = lon_neg
+        // The exact coordinate signs must match the disclosed signs.
+        let disclosed_location_flags_u8 = disclosed_location_flags as u8;
+        assert(disclosed_location_flags_u8 <= 3, "disclosed_location_flags must only use bits 0-1");
+        let disclosed_lat_neg = (disclosed_location_flags_u8 & 1) as Field;
+        let disclosed_lon_neg = ((disclosed_location_flags_u8 >> 1) & 1) as Field;
+        assert(disclosed_lat_neg == exact_lat_is_negative, "disclosed latitude sign does not match exact latitude sign");
+        assert(disclosed_lon_neg == exact_lon_is_negative, "disclosed longitude sign does not match exact longitude sign");
     } else {
         // When not disclosing: all location public inputs must be zero
         assert(disclosed_lat_min == 0, "disclosed_lat_min must be 0 when hidden");
@@ -318,7 +322,7 @@ fn test_single_image_v2_all_disclosed() {
         150,                  // disclosed_lat_max
         100,                  // disclosed_lon_min
         300,                  // disclosed_lon_max
-        1,                    // disclosed_location_flags
+        2,                    // disclosed_location_flags (bit0=lat_neg=0, bit1=lon_neg=1)
         1706700000,           // disclosed_time_min
         1706800000,           // disclosed_time_max
         1708900000,           // disclosed_edit_time_min
