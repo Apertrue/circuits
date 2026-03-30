@@ -363,6 +363,7 @@ pub contract ApertrueVerifier {
         assert(sender == admin, "Only admin can update Merkle root");
 
         let current_size = self.storage.tree_size.read();
+        assert(current_size as u64 as Field == current_size, "stored tree_size exceeds u64 range");
         assert(new_tree_size as u64 as Field == new_tree_size, "new_tree_size exceeds u64 range");
         assert(
             new_tree_size as u64 > current_size as u64,
