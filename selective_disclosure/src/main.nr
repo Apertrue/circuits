@@ -106,6 +106,8 @@ fn main(
     // For single-image batches (path_depth == 0), the leaf IS the root.
     let mut current = image_commitment;
     let depth = path_depth as u32;
+    assert(path_depth as u32 as Field == path_depth, "path_depth does not fit in u32");
+    assert(depth <= MAX_TREE_DEPTH, "path_depth exceeds MAX_TREE_DEPTH");
 
     for i in 0..MAX_TREE_DEPTH {
         if i < depth {
@@ -172,6 +174,10 @@ fn main(
         "disclosed_proof_timestamp mismatch",
     );
 
+    // SECURITY: Constrain sign flags to boolean
+    assert((exact_lat_is_negative == 0) | (exact_lat_is_negative == 1), "exact_lat_is_negative must be 0 or 1");
+    assert((exact_lon_is_negative == 0) | (exact_lon_is_negative == 1), "exact_lon_is_negative must be 0 or 1");
+
     // --- 6. Verify location_commitment preimage ---
     // location_commitment = Poseidon2([lat, lon, lat_sign, lon_sign, salt], 5)
     let computed_location = Poseidon2::hash(
@@ -207,6 +213,13 @@ fn main(
     // Sign bits in disclosed_location_flags encode whether bounds are negative.
     // All comparisons done via u64 cast (coordinates are scaled positive integers).
     if disclose_location_range == 1 {
+        assert(exact_lat_scaled as u64 as Field == exact_lat_scaled, "exact_lat_scaled exceeds u64");
+        assert(disclosed_lat_min as u64 as Field == disclosed_lat_min, "disclosed_lat_min exceeds u64");
+        assert(disclosed_lat_max as u64 as Field == disclosed_lat_max, "disclosed_lat_max exceeds u64");
+        assert(exact_lon_scaled as u64 as Field == exact_lon_scaled, "exact_lon_scaled exceeds u64");
+        assert(disclosed_lon_min as u64 as Field == disclosed_lon_min, "disclosed_lon_min exceeds u64");
+        assert(disclosed_lon_max as u64 as Field == disclosed_lon_max, "disclosed_lon_max exceeds u64");
+
         let lat = exact_lat_scaled as u64;
         let lat_min = disclosed_lat_min as u64;
         let lat_max = disclosed_lat_max as u64;
@@ -240,6 +253,10 @@ fn main(
     // --- 9. Time range proof ---
     // If disclosing time range: verify exact timestamp falls within disclosed bounds.
     if disclose_time_range == 1 {
+        assert(exact_timestamp as u64 as Field == exact_timestamp, "exact_timestamp exceeds u64");
+        assert(disclosed_time_min as u64 as Field == disclosed_time_min, "disclosed_time_min exceeds u64");
+        assert(disclosed_time_max as u64 as Field == disclosed_time_max, "disclosed_time_max exceeds u64");
+
         let ts = exact_timestamp as u64;
         let ts_min = disclosed_time_min as u64;
         let ts_max = disclosed_time_max as u64;
@@ -253,6 +270,10 @@ fn main(
     // --- 9b. Edit time range proof ---
     if disclose_edit_time_range == 1 {
         assert(exact_edit_timestamp != 0, "Cannot disclose edit time with no edit");
+        assert(exact_edit_timestamp as u64 as Field == exact_edit_timestamp, "exact_edit_timestamp exceeds u64");
+        assert(disclosed_edit_time_min as u64 as Field == disclosed_edit_time_min, "disclosed_edit_time_min exceeds u64");
+        assert(disclosed_edit_time_max as u64 as Field == disclosed_edit_time_max, "disclosed_edit_time_max exceeds u64");
+
         let ts = exact_edit_timestamp as u64;
         let ts_min = disclosed_edit_time_min as u64;
         let ts_max = disclosed_edit_time_max as u64;

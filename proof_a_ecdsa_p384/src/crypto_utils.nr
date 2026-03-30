@@ -19,6 +19,11 @@ pub fn verify_ecdsa_p384(
     let pk_y: Secp384r1_Fq = Secp384r1_Fq::from_be_bytes(pubkey_y);
     let r: Secp384r1_Fr = Secp384r1_Fr::from_be_bytes(sig_r);
     let s: Secp384r1_Fr = Secp384r1_Fr::from_be_bytes(sig_s);
+
+    // Security: reject zero r or s (invalid per SEC1/FIPS 186-5)
+    assert(r != Secp384r1_Fr::zero(), "ECDSA P-384 r must not be zero");
+    assert(s != Secp384r1_Fr::zero(), "ECDSA P-384 s must not be zero");
+
     let e: Secp384r1_Fr = Secp384r1_Fr::from_be_bytes(message_hash);
 
     // Compute s^-1 mod n (unconstrained, then verify)

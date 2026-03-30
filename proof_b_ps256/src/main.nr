@@ -119,6 +119,7 @@ fn main(
     // ================================================================
     // STEP 2: Verify sig_structure hash matches cose_message_hash
     // ================================================================
+    assert(sig_structure_length as u32 <= MAX_SIG_STRUCTURE_SIZE as u32, "sig_structure_length exceeds buffer");
     let computed_sig_hash = sha256_var(sig_structure_bytes, sig_structure_length as u32);
     assert(computed_sig_hash == cose_message_hash, "Sig_structure hash does not match COSE message hash");
 
@@ -136,6 +137,7 @@ fn main(
     // ================================================================
     // STEP 4: Verify claim_hash matches SHA256(claim_bytes)
     // ================================================================
+    assert(claim_length as u32 <= MAX_CLAIM_SIZE as u32, "claim_length exceeds buffer");
     let computed_claim_hash = sha256_var(claim_bytes, claim_length as u32);
     assert(computed_claim_hash == claim_hash, "Claim hash mismatch - claim_bytes integrity violated");
 
@@ -191,6 +193,9 @@ fn main(
     // ================================================================
     // STEP 8: Verify certificate validity at proof time
     // ================================================================
+    assert(proof_timestamp as u64 as Field == proof_timestamp, "proof_timestamp exceeds u64");
+    assert(cert_not_before as u64 as Field == cert_not_before, "cert_not_before exceeds u64");
+    assert(cert_not_after as u64 as Field == cert_not_after, "cert_not_after exceeds u64");
     let ts = proof_timestamp as u64;
     let not_before = cert_not_before as u64;
     let not_after = cert_not_after as u64;
@@ -232,6 +237,7 @@ fn compute_merkle_root(
     let mut current = leaf;
 
     for i in 0..MERKLE_TREE_DEPTH {
+        assert((indices[i] == 0) | (indices[i] == 1), "Merkle index must be 0 or 1");
         let path_element = path[i];
         let is_right = indices[i];
         let left = if is_right == 0 { current } else { path_element };

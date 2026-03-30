@@ -73,6 +73,9 @@ pub fn verify_claim_hash(
     claim_length: u32,
     expected_claim_hash: [u8; 32]
 ) {
+    // Bounds check: claim_length must not exceed buffer size
+    assert(claim_length <= MAX_CLAIM_SIZE, "claim_length exceeds MAX_CLAIM_SIZE");
+
     // Compute SHA256 of the ACTUAL claim bytes (not padded)
     // sha256_var hashes only the first claim_length bytes
     let computed_hash: [u8; 32] = dep::sha256::sha256_var(claim_bytes, claim_length as u32);
@@ -136,6 +139,9 @@ pub fn verify_assertion_hash(
     assertion_length: u32,
     expected_hash: [u8; 32]
 ) {
+    // Bounds check: assertion_length must not exceed buffer size
+    assert(assertion_length <= MAX_EXIF_ASSERTION_SIZE, "assertion_length exceeds buffer");
+
     // Compute SHA256 of the ACTUAL assertion bytes (not padded)
     // sha256_var hashes only the first assertion_length bytes
     let computed_hash: [u8; 32] = dep::sha256::sha256_var(assertion_bytes, assertion_length as u32);
@@ -436,6 +442,9 @@ pub fn verify_actions_assertion_hash(
     assertion_length: u32,
     expected_hash: [u8; 32]
 ) {
+    // Bounds check: assertion_length must not exceed buffer size
+    assert(assertion_length <= MAX_ACTIONS_ASSERTION_SIZE, "actions_assertion_length exceeds buffer");
+
     // Compute SHA256 of the ACTUAL assertion bytes (not padded)
     // sha256_var hashes only the first assertion_length bytes
     let computed_hash: [u8; 32] = dep::sha256::sha256_var(assertion_bytes, assertion_length as u32);

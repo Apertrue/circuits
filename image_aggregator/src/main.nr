@@ -14,9 +14,9 @@
 // - Preserves nullifier for replay prevention
 //
 // IMPORTANT: verify_honk_proof requires ALL public inputs+outputs from the inner proof.
-// ProofA has 53 public values (17 inputs + 36 outputs), ProofB has 9 public values (8 inputs + 1 output).
+// ProofA has 55 public values (19 inputs + 36 outputs), ProofB has 9 public values (8 inputs + 1 output).
 //
-// Public values layout (10 total = 4 inputs + 6 outputs):
+// Public values layout (12 total = 4 inputs + 8 outputs):
 // [0] trust_list_root (input)
 // [1] content_hash (input)
 // [2] nullifier (input)
@@ -27,6 +27,8 @@
 // [7] link_commit (output)
 // [8] actions_hash_field (output)
 // [9] image_commitment (output)
+// [10] vk_a_hash (output)
+// [11] vk_b_hash (output)
 //
 // Estimated constraints: ~100k (2x verify_proof + Poseidon hash)
 
@@ -38,9 +40,9 @@ use dep::bb_proof_verification::{
 use dep::poseidon::poseidon2::Poseidon2;
 
 // Number of public values for each proof (inputs + outputs)
-// ProofA: 17 inputs + 36 outputs = 53 (after public input packing + edit time)
+// ProofA: 19 inputs + 36 outputs = 55 (after public input packing + edit time + skip flags)
 // ProofB: 8 inputs + 1 output = 9 (added claim_hash_commitment)
-global PROOF_A_PUBLIC_VALUES: u32 = 53;
+global PROOF_A_PUBLIC_VALUES: u32 = 55;
 global PROOF_B_PUBLIC_VALUES: u32 = 9;
 
 // Main entry point for ImageAggregator
@@ -80,10 +82,10 @@ fn main(
     vk_a_hash: Field,
     vk_b_hash: Field,
 
-    // === PRIVATE INPUTS: ALL PROOF_A PUBLIC VALUES (53 total) ===
+    // === PRIVATE INPUTS: ALL PROOF_A PUBLIC VALUES (55 total) ===
     // These must be passed to verify_honk_proof in exact order
     //
-    // ProofA PUBLIC INPUTS (17 total, after packing optimization + edit time):
+    // ProofA PUBLIC INPUTS (19 total, after packing optimization + edit time + skip flags):
     // [0] trust_list_root: Field
     // [1] content_hash: Field
     // [2] nullifier: Field
@@ -101,14 +103,16 @@ fn main(
     // [14] tbs_hash_commitment: Field (Poseidon2 of TBS hash bytes)
     // [15] claim_hash_commitment: Field (Poseidon2 of claim hash bytes)
     // [16] content_hash_offset: Field (u32 as Field)
+    // [17] skip_flag_a: Field
+    // [18] skip_flag_b: Field
     //
     // ProofA PUBLIC OUTPUTS (36 total):
-    // [17] link_commit: Field
-    // [18] location_commitment: Field
-    // [19] time_commitment: Field
-    // [20] edit_time_commitment: Field
-    // [21..53] actions_assertion_hash: [Field; 32] (u8 as Field)
-    proof_a_public_values: [Field; 53],
+    // [19] link_commit: Field
+    // [20] location_commitment: Field
+    // [21] time_commitment: Field
+    // [22] edit_time_commitment: Field
+    // [23..55] actions_assertion_hash: [Field; 32] (u8 as Field)
+    proof_a_public_values: [Field; 55],
 
     // === PRIVATE INPUTS: ALL PROOF_B PUBLIC VALUES (9 total) ===
     //
@@ -125,11 +129,11 @@ fn main(
     // ProofB PUBLIC OUTPUT (1 total):
     // [8] link_commit: Field
     proof_b_public_values: [Field; 9],
-) -> pub (Field, Field, Field, Field, Field, Field) {
+) -> pub (Field, Field, Field, Field, Field, Field, Field, Field) {
     // ================================================================
     // STEP 1: Verify ProofA (certificate chain verification)
     // ================================================================
-    // Pass ALL 50 public values to verify_honk_proof
+    // Pass ALL 55 public values to verify_honk_proof
     verify_honk_proof(
         vk_a,
         proof_a,
@@ -179,6 +183,22 @@ fn main(
         "claim_hash_commitment mismatch between ProofA and ProofB"
     );
 
+    // SECURITY: Verify cert validity period matches
+    assert(
+        proof_a_public_values[4] == proof_b_public_values[4],
+        "cert_not_before mismatch between ProofA and ProofB"
+    );
+    assert(
+        proof_a_public_values[5] == proof_b_public_values[5],
+        "cert_not_after mismatch between ProofA and ProofB"
+    );
+
+    // SECURITY: Verify content_hash_offset matches
+    assert(
+        proof_a_public_values[16] == proof_b_public_values[7],
+        "content_hash_offset mismatch between ProofA and ProofB"
+    );
+
     // Also verify these match our own public inputs
     assert(
         proof_a_public_values[0] == trust_list_root,
@@ -203,31 +223,32 @@ fn main(
     // SECURITY: This prevents proof substitution attacks where an attacker
     // could mix ProofA from image A with ProofB from image B.
     //
-    // ProofA link_commit is at index 17 (first output after 17 inputs)
+    // ProofA link_commit is at index 19 (first output after 19 inputs)
     // ProofB link_commit is at index 8 (first output after 8 inputs)
-    let link_commit_a = proof_a_public_values[17];
+    let link_commit_a = proof_a_public_values[19];
     let link_commit_b = proof_b_public_values[8];
 
     assert(
         link_commit_a == link_commit_b,
         "Link commitment mismatch: ProofA and ProofB were not generated from the same image"
     );
+    assert(link_commit_a != 0, "link_commit must not be zero");
 
     // ================================================================
     // STEP 5: Extract ProofA commitment outputs
     // ================================================================
-    // ProofA outputs at indices 17-20 are commitment fields:
-    // [17] link_commit, [18] location_commitment, [19] time_commitment, [20] edit_time_commitment
-    let link_commit = proof_a_public_values[17];
-    let location_commitment = proof_a_public_values[18];
-    let time_commitment = proof_a_public_values[19];
-    let edit_time_commitment = proof_a_public_values[20];
+    // ProofA outputs at indices 19-22 are commitment fields:
+    // [19] link_commit, [20] location_commitment, [21] time_commitment, [22] edit_time_commitment
+    let link_commit = proof_a_public_values[19];
+    let location_commitment = proof_a_public_values[20];
+    let time_commitment = proof_a_public_values[21];
+    let edit_time_commitment = proof_a_public_values[22];
 
-    // ProofA outputs at indices 21-52 are actions_assertion_hash [u8; 32] as Fields.
+    // ProofA outputs at indices 23-54 are actions_assertion_hash [u8; 32] as Fields.
     // Reduce to a single Field via Poseidon2 for inclusion in image_commitment.
     let mut actions_bytes: [Field; 32] = [0; 32];
     for i in 0..32 {
-        actions_bytes[i] = proof_a_public_values[21 + i];
+        actions_bytes[i] = proof_a_public_values[23 + i];
     }
     let actions_hash_field = Poseidon2::hash(actions_bytes, 32);
 
@@ -245,7 +266,7 @@ fn main(
         9,
     );
 
-    (location_commitment, time_commitment, edit_time_commitment, link_commit, actions_hash_field, image_commitment)
+    (location_commitment, time_commitment, edit_time_commitment, link_commit, actions_hash_field, image_commitment, vk_a_hash, vk_b_hash)
 }
 
 // ====================================================================
