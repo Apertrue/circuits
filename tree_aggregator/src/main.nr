@@ -18,21 +18,23 @@
 //                                                      |
 // Level 3:                                      [FINAL_PROOF]
 //
-// IMPORTANT: At level 0, we verify ImageAggregator proofs which have 10 public values:
+// IMPORTANT: At level 0, we verify ImageAggregator proofs which have 12 public values:
 // [trust_list_root, content_hash, nullifier, proof_timestamp,
 //  location_commitment, time_commitment, edit_time_commitment,
-//  link_commit, actions_hash_field, image_commitment]
-// At level 1+, we verify TreeAggregator proofs which also have 10 public values:
-// [0, 0, 0, 0, 0, 0, 0, 0, 0, combined_commitment]  (padded to match ImageAggregator layout)
+//  link_commit, actions_hash_field, image_commitment, vk_a_hash, vk_b_hash]
+// At level 1+, we verify TreeAggregator proofs which also have 12 public values:
+// [0, 0, 0, 0, 0, 0, 0, 0, 0, combined_commitment, vk_hash_left, vk_hash_right]  (padded to match ImageAggregator layout)
 //
 // At each level, TreeAggregator:
 // 1. Verifies left child proof
 // 2. Verifies right child proof
 // 3. Combines their commitments into a new combined_commitment
 //
-// Public values layout (10 total = 9 padding inputs + 1 output):
+// Public values layout (12 total = 9 padding inputs + 3 outputs):
 // [0..8] padding (must be zero) -- matches ImageAggregator's 4 inputs + 5 commitment outputs
 // [9]    combined_commitment (output)
+// [10]   vk_hash_left (output)
+// [11]   vk_hash_right (output)
 //
 // Estimated constraints: ~50k (2x verify_proof + Poseidon hash)
 
@@ -43,29 +45,29 @@ use dep::bb_proof_verification::{
 };
 use dep::poseidon::poseidon2::Poseidon2;
 
-// Number of public values for ImageAggregator (4 inputs + 6 outputs)
-global IMAGE_AGG_PUBLIC_VALUES: u32 = 10;
+// Number of public values for ImageAggregator (4 inputs + 8 outputs)
+global IMAGE_AGG_PUBLIC_VALUES: u32 = 12;
 
 // Main entry point for TreeAggregator
 //
 // PUBLIC INPUTS (9 padding fields, forced to zero):
-// - pad_0..pad_8: Must be zero. These exist so TreeAggregator has 10 public
-//   values (9 inputs + 1 return) matching ImageAggregator's layout. This
+// - pad_0..pad_8: Must be zero. These exist so TreeAggregator has 12 public
+//   values (9 inputs + 3 returns) matching ImageAggregator's layout. This
 //   ensures verify_honk_proof works identically at every tree level.
 //
 // PRIVATE INPUTS:
 // - combined_commitment: The expected Poseidon2([commitment_left, commitment_right])
-//   Made private to keep it at index 8 of public values (as the return value).
+//   Made private to keep it at index 9 of public values (as the first return value).
 // - proof_left: Left child proof (ImageProof or previous TreeProof)
 // - proof_right: Right child proof (ImageProof or previous TreeProof)
-// - vk: Verification key (same for both - they're from the same circuit type)
-// - vk_hash: Hash of the VK for recursive verification
-// - public_values_left: All public values from left child proof (9 values)
-// - public_values_right: All public values from right child proof (9 values)
+// - vk_left/vk_right: Verification keys for left/right child proofs
+// - vk_hash_left/vk_hash_right: Hash of the VKs for recursive verification
+// - public_values_left: All public values from left child proof (12 values)
+// - public_values_right: All public values from right child proof (12 values)
 //
-// PUBLIC OUTPUT:
-// - Returns the combined_commitment at index 9
-//   Public values layout: [0, 0, 0, 0, 0, 0, 0, 0, 0, combined_commitment]
+// PUBLIC OUTPUTS:
+// - Returns (combined_commitment, vk_hash_left, vk_hash_right)
+//   Public values layout: [0, 0, 0, 0, 0, 0, 0, 0, 0, combined_commitment, vk_hash_left, vk_hash_right]
 fn main(
     // === PUBLIC INPUTS (padding - must be zero) ===
     pad_0: pub Field,
@@ -94,7 +96,7 @@ fn main(
     vk_hash_right: Field,
 
     // === PRIVATE INPUTS: ALL PUBLIC VALUES FROM CHILD PROOFS ===
-    // For ImageAggregator proofs (level 0): 10 values each
+    // For ImageAggregator proofs (level 0): 12 values each
     // [0] trust_list_root
     // [1] content_hash
     // [2] nullifier
@@ -105,11 +107,13 @@ fn main(
     // [7] link_commit
     // [8] actions_hash_field
     // [9] image_commitment (the output we care about)
+    // [10] vk_a_hash
+    // [11] vk_b_hash
     //
-    // For TreeAggregator proofs (level 1+): [0, 0, 0, 0, 0, 0, 0, 0, 0, combined_commitment]
-    public_values_left: [Field; 10],
-    public_values_right: [Field; 10],
-) -> pub Field {
+    // For TreeAggregator proofs (level 1+): [0, 0, 0, 0, 0, 0, 0, 0, 0, combined_commitment, vk_hash_left, vk_hash_right]
+    public_values_left: [Field; 12],
+    public_values_right: [Field; 12],
+) -> pub (Field, Field, Field) {
     // ================================================================
     // STEP 0: Enforce padding fields are zero
     // ================================================================
@@ -148,7 +152,7 @@ fn main(
     // ================================================================
     // STEP 3: Compute and verify combined commitment
     // ================================================================
-    // The commitment is always the LAST value in the public values array
+    // The commitment is at index 9 in the public values array (first output)
     // For ImageAggregator: index 9 (image_commitment)
     // For TreeAggregator: index 9 (combined_commitment, padded to position 9)
     let commitment_left = public_values_left[9];
@@ -169,9 +173,9 @@ fn main(
         "Combined commitment mismatch: tree structure invalid"
     );
 
-    // Return the combined commitment as public output
+    // Return the combined commitment and VK hashes as public outputs
     // This allows the next level of aggregation to verify it
-    combined_commitment
+    (combined_commitment, vk_hash_left, vk_hash_right)
 }
 
 // ====================================================================
@@ -218,7 +222,7 @@ fn test_different_children_different_commitment() {
 #[test]
 fn test_commitment_index_location() {
     // Verify that commitment is correctly extracted from index 9
-    let public_values: [Field; 10] = [
+    let public_values: [Field; 12] = [
         111, // trust_list_root
         222, // content_hash
         333, // nullifier
@@ -229,6 +233,8 @@ fn test_commitment_index_location() {
         888, // link_commit
         999, // actions_hash_field
         1010, // image_commitment (this is what we use)
+        1111, // vk_a_hash
+        1212, // vk_b_hash
     ];
 
     let commitment = public_values[9];

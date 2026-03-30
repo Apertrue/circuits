@@ -156,8 +156,8 @@ pub contract ApertrueVerifier {
     //   proof             - 500-field UltraHonkZK proof from tree aggregator
     //   vk                - 115-field verification key for tree aggregator circuit
     //   vk_hash           - Hash of VK (checked against stored immutable hash)
-    //   public_values     - 10 public values from tree aggregator:
-    //                        [0, 0, 0, 0, 0, 0, 0, 0, 0, root_commitment]
+    //   public_values     - 12 public values from tree aggregator:
+    //                        [0, 0, 0, 0, 0, 0, 0, 0, 0, root_commitment, vk_hash_left, vk_hash_right]
     //   image_count       - Number of images in the batch
     //   trust_list_root   - Trust list root used during proving
     //   epoch_week        - ISO week number for coarse timing
@@ -169,7 +169,7 @@ pub contract ApertrueVerifier {
         proof: UltraHonkZKProof,
         vk: UltraHonkVerificationKey,
         vk_hash: Field,
-        public_values: [Field; 10],
+        public_values: [Field; 12],
         image_count: Field,
         trust_list_root: Field,
         epoch_week: Field,
@@ -193,6 +193,8 @@ pub contract ApertrueVerifier {
         assert(public_values[7] == 0, "public_values padding [7] must be zero");
         assert(public_values[8] == 0, "public_values padding [8] must be zero");
         assert(public_values[9] != 0, "root_commitment must not be zero");
+        // public_values[10] = vk_hash_left (tree aggregator output, for external VK allowlist checking)
+        // public_values[11] = vk_hash_right (tree aggregator output, for external VK allowlist checking)
 
         // ============================================================
         // VK HASH CHECK (private historical read of PublicImmutable)
@@ -208,7 +210,7 @@ pub contract ApertrueVerifier {
 
         // ============================================================
         // STEP 2: Extract root_commitment from public values
-        // Tree aggregator output: [0, 0, 0, 0, 0, 0, 0, 0, 0, root_commitment]
+        // Tree aggregator output: [0, 0, 0, 0, 0, 0, 0, 0, 0, root_commitment, vk_hash_left, vk_hash_right]
         // ============================================================
         let root_commitment = public_values[9];
 
@@ -361,8 +363,10 @@ pub contract ApertrueVerifier {
         assert(sender == admin, "Only admin can update Merkle root");
 
         let current_size = self.storage.tree_size.read();
+        assert(current_size as u64 as Field == current_size, "stored tree_size exceeds u64 range");
+        assert(new_tree_size as u64 as Field == new_tree_size, "new_tree_size exceeds u64 range");
         assert(
-            new_tree_size as u64 >= current_size as u64,
+            new_tree_size as u64 > current_size as u64,
             "Tree size cannot decrease",
         );
 

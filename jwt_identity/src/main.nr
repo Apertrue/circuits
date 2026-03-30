@@ -46,7 +46,7 @@ fn main(
     let mut found_at = false;
     for i in 0..MAX_EMAIL_LENGTH {
         if i < email.len() {
-            if email.get(i) == 64 {
+            if (email.get(i) == 64) & (!found_at) {
                 at_pos = i + 1;
                 found_at = true;
             }

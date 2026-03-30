@@ -79,8 +79,8 @@ fn main(
     claim_hash: [u8; 32],
 
     // === PRIVATE: SKIP FLAGS ===
-    skip_content_hash_binding: u8,
-    skip_assertion_hash_verification: u8,
+    skip_content_hash_binding: pub u8,
+    skip_assertion_hash_verification: pub u8,
 
     // === PRIVATE: RSA-2048 LEAF KEY (first 8 limbs for nullifier binding) ===
     leaf_rsa_modulus_limbs: [u128; 8],
@@ -204,6 +204,9 @@ fn main(
     // ================================================================
     // STEP 5: Certificate Validity
     // ================================================================
+    assert(proof_timestamp as u64 as Field == proof_timestamp, "proof_timestamp exceeds u64");
+    assert(cert_not_before as u64 as Field == cert_not_before, "cert_not_before exceeds u64");
+    assert(cert_not_after as u64 as Field == cert_not_after, "cert_not_after exceeds u64");
     let ts = proof_timestamp as u64;
     let not_before = cert_not_before as u64;
     let not_after = cert_not_after as u64;
@@ -213,6 +216,9 @@ fn main(
     // ================================================================
     // STEP 6: Time Range Proof
     // ================================================================
+    assert(exact_timestamp as u64 as Field == exact_timestamp, "exact_timestamp exceeds u64");
+    assert(time_min as u64 as Field == time_min, "time_min exceeds u64");
+    assert(time_max as u64 as Field == time_max, "time_max exceeds u64");
     let exact_ts = exact_timestamp as u64;
     let min_ts = time_min as u64;
     let max_ts = time_max as u64;
@@ -226,6 +232,9 @@ fn main(
     // When a photo is edited (capture -> export), exact_edit_timestamp is the
     // signing/export time. For direct camera captures, it's 0 (sentinel).
     if exact_edit_timestamp != 0 {
+        assert(exact_edit_timestamp as u64 as Field == exact_edit_timestamp, "exact_edit_timestamp exceeds u64");
+        assert(edit_time_min as u64 as Field == edit_time_min, "edit_time_min exceeds u64");
+        assert(edit_time_max as u64 as Field == edit_time_max, "edit_time_max exceeds u64");
         let edit_ts = exact_edit_timestamp as u64;
         let edit_min = edit_time_min as u64;
         let edit_max = edit_time_max as u64;
@@ -243,6 +252,16 @@ fn main(
     assert(location_flags <= 3, "location_flags has invalid high bits set (must be 0-3)");
     let center_lat_is_negative = location_flags & 1;
     let center_lon_is_negative = (location_flags >> 1) & 1;
+
+    assert(exact_lat_is_negative <= 1, "exact_lat_is_negative must be 0 or 1");
+    assert(exact_lon_is_negative <= 1, "exact_lon_is_negative must be 0 or 1");
+    assert(skip_content_hash_binding <= 1, "skip_content_hash_binding must be 0 or 1");
+    assert(skip_assertion_hash_verification <= 1, "skip_assertion_hash_verification must be 0 or 1");
+
+    assert(exact_lat_scaled as u64 as Field == exact_lat_scaled, "exact_lat_scaled exceeds u64");
+    assert(center_lat_scaled as u64 as Field == center_lat_scaled, "center_lat_scaled exceeds u64");
+    assert(exact_lon_scaled as u64 as Field == exact_lon_scaled, "exact_lon_scaled exceeds u64");
+    assert(center_lon_scaled as u64 as Field == center_lon_scaled, "center_lon_scaled exceeds u64");
 
     {
         let lat_same_sign = (exact_lat_is_negative == center_lat_is_negative);
@@ -268,6 +287,8 @@ fn main(
         };
 
         let distance_squared = d_lat * d_lat + d_lon * d_lon;
+        assert(distance_squared as u64 as Field == distance_squared, "distance_squared exceeds u64");
+        assert(radius_squared_scaled as u64 as Field == radius_squared_scaled, "radius_squared_scaled exceeds u64");
         assert(
             distance_squared as u64 <= radius_squared_scaled as u64,
             "Location outside privacy circle"
@@ -362,6 +383,7 @@ fn verify_content_hash_binding(
 fn compute_merkle_root(leaf: Field, path: [Field; 8], indices: [Field; 8]) -> Field {
     let mut current = leaf;
     for i in 0..8 {
+        assert((indices[i] == 0) | (indices[i] == 1), "Merkle index must be 0 or 1");
         let path_element = path[i];
         let is_right = indices[i];
         let left = if is_right == 0 { current } else { path_element };

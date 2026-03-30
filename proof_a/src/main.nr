@@ -91,10 +91,10 @@ fn main(
     // Skip content hash binding verification for C2PA manifests where content hash
     // is in a separate assertion (c2pa.hash.data) rather than directly in the claim.
     // The hash chain is still verified via assertion_hash -> content_hash.
-    skip_content_hash_binding: u8,  // 0 = verify (default), 1 = skip
+    skip_content_hash_binding: pub u8,  // 0 = verify (default), 1 = skip
     // Skip assertion hash verification for manifests where assertion data isn't available
     // or parseable (e.g., some ProofMode 2-cert chain configurations).
-    skip_assertion_hash_verification: u8,  // 0 = verify (default), 1 = skip
+    skip_assertion_hash_verification: pub u8,  // 0 = verify (default), 1 = skip
 
     // === PRIVATE: LEAF KEY (for nullifier binding) ===
     // ECDSA leaf key
@@ -280,6 +280,12 @@ fn main(
         assert(false, f"Invalid certificate algorithm: {cert_algorithm}");
     }
 
+    // NOTE: cert_algorithm describes how the INTERMEDIATE cert signature is verified
+    // (e.g., RSA-2048-SHA384), while leaf_key_type describes the LEAF certificate's key type
+    // (e.g., ECDSA P-256). These are independent -- a CA can sign with RSA but issue ECDSA
+    // leaf certs (e.g., Truepic: cert_algorithm=3/RSA-2048-SHA384, leaf_key_type=0/ECDSA).
+    // No cross-check is valid here.
+
     // ================================================================
     // STEP 2: Derive Leaf Key Hash
     // ================================================================
@@ -392,6 +398,11 @@ fn main(
     // ================================================================
     // STEP 5: Certificate Validity (Time)
     // ================================================================
+    // SECURITY: Ensure Field values fit in u64 before comparison
+    assert(proof_timestamp as u64 as Field == proof_timestamp, "proof_timestamp exceeds u64");
+    assert(cert_not_before as u64 as Field == cert_not_before, "cert_not_before exceeds u64");
+    assert(cert_not_after as u64 as Field == cert_not_after, "cert_not_after exceeds u64");
+
     let ts = proof_timestamp as u64;
     let not_before = cert_not_before as u64;
     let not_after = cert_not_after as u64;
@@ -412,6 +423,10 @@ fn main(
     //
     // This protects journalists/activists by hiding precise capture times
     // while still proving the photo has a valid timestamp within the range.
+    assert(exact_timestamp as u64 as Field == exact_timestamp, "exact_timestamp exceeds u64");
+    assert(time_min as u64 as Field == time_min, "time_min exceeds u64");
+    assert(time_max as u64 as Field == time_max, "time_max exceeds u64");
+
     let exact_ts = exact_timestamp as u64;
     let min_ts = time_min as u64;
     let max_ts = time_max as u64;
@@ -425,6 +440,10 @@ fn main(
     // ================================================================
     // When a photo is edited (capture -> export), exact_edit_timestamp is the
     // signing/export time. For direct camera captures, it's 0 (sentinel).
+    assert(exact_edit_timestamp as u64 as Field == exact_edit_timestamp, "exact_edit_timestamp exceeds u64");
+    assert(edit_time_min as u64 as Field == edit_time_min, "edit_time_min exceeds u64");
+    assert(edit_time_max as u64 as Field == edit_time_max, "edit_time_max exceeds u64");
+
     if exact_edit_timestamp != 0 {
         let edit_ts = exact_edit_timestamp as u64;
         let edit_min = edit_time_min as u64;
@@ -462,10 +481,20 @@ fn main(
     // Now we ALWAYS verify location. For radius=0 (exact disclosure), we verify
     // center == exact coordinates. For radius>0, we verify distance <= radius.
 
+    assert(exact_lat_is_negative <= 1, "exact_lat_is_negative must be 0 or 1");
+    assert(exact_lon_is_negative <= 1, "exact_lon_is_negative must be 0 or 1");
+    assert(skip_content_hash_binding <= 1, "skip_content_hash_binding must be 0 or 1");
+    assert(skip_assertion_hash_verification <= 1, "skip_assertion_hash_verification must be 0 or 1");
+
     // Unpack location_flags: bit 0 = lat negative, bit 1 = lon negative
     assert(location_flags <= 3, "location_flags has invalid high bits set (must be 0-3)");
     let center_lat_is_negative = location_flags & 1;
     let center_lon_is_negative = (location_flags >> 1) & 1;
+
+    assert(exact_lat_scaled as u64 as Field == exact_lat_scaled, "exact_lat_scaled exceeds u64");
+    assert(center_lat_scaled as u64 as Field == center_lat_scaled, "center_lat_scaled exceeds u64");
+    assert(exact_lon_scaled as u64 as Field == exact_lon_scaled, "exact_lon_scaled exceeds u64");
+    assert(center_lon_scaled as u64 as Field == center_lon_scaled, "center_lon_scaled exceeds u64");
 
     {
         // Calculate latitude difference (accounting for hemisphere)
@@ -505,6 +534,8 @@ fn main(
         let distance_squared = d_lat * d_lat + d_lon * d_lon;
 
         // Verify exact location is within privacy circle
+        assert(distance_squared as u64 as Field == distance_squared, "distance_squared exceeds u64");
+        assert(radius_squared_scaled as u64 as Field == radius_squared_scaled, "radius_squared_scaled exceeds u64");
         assert(
             distance_squared as u64 <= radius_squared_scaled as u64,
             "Exact GPS location is outside disclosed privacy circle"
@@ -762,6 +793,7 @@ fn compute_merkle_root(
     let mut current = leaf;
 
     for i in 0..8 {
+        assert((indices[i] == 0) | (indices[i] == 1), "Merkle index must be 0 or 1");
         let path_element = path[i];
         let is_right = indices[i];
 
