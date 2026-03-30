@@ -255,6 +255,8 @@ fn main(
 
     assert(exact_lat_is_negative <= 1, "exact_lat_is_negative must be 0 or 1");
     assert(exact_lon_is_negative <= 1, "exact_lon_is_negative must be 0 or 1");
+    assert(skip_content_hash_binding <= 1, "skip_content_hash_binding must be 0 or 1");
+    assert(skip_assertion_hash_verification <= 1, "skip_assertion_hash_verification must be 0 or 1");
 
     assert(exact_lat_scaled as u64 as Field == exact_lat_scaled, "exact_lat_scaled exceeds u64");
     assert(center_lat_scaled as u64 as Field == center_lat_scaled, "center_lat_scaled exceeds u64");

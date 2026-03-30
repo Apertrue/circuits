@@ -485,6 +485,8 @@ fn main(
 
     assert(exact_lat_is_negative <= 1, "exact_lat_is_negative must be 0 or 1");
     assert(exact_lon_is_negative <= 1, "exact_lon_is_negative must be 0 or 1");
+    assert(skip_content_hash_binding <= 1, "skip_content_hash_binding must be 0 or 1");
+    assert(skip_assertion_hash_verification <= 1, "skip_assertion_hash_verification must be 0 or 1");
 
     // Unpack location_flags: bit 0 = lat negative, bit 1 = lon negative
     assert(location_flags <= 3, "location_flags has invalid high bits set (must be 0-3)");

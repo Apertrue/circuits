@@ -24,7 +24,7 @@ GPS coordinates (`exact_lat_scaled`, `exact_lon_scaled`) and timestamps (`exact_
 
 SHA-256 outputs (256 bits) and P-384 coordinates (384 bits) exceed the BN254 scalar field (~254 bits). The `bytes_to_field` helper silently reduces modulo p, creating a theoretical collision space.
 
-**Impact**: For SHA-256 hashes, approximately 1 in 2^2 values have a collision partner. For P-384 coordinates, the collision space is larger. Finding a meaningful collision (two valid certificates or hashes that map to the same field element) remains computationally infeasible.
+**Impact**: For SHA-256 hashes (256 bits → ~254-bit field), approximately 3 out of every 4 field elements have a second preimage under reduction. For P-384 coordinates (384 bits), the collision space is proportionally larger. However, finding a meaningful collision — two valid certificates or hashes that map to the same field element — remains computationally infeasible, as it requires finding valid structured data (not arbitrary byte strings) that collide.
 
 **Future fix**: Split 32-byte values into two 128-bit field elements. This is a breaking change to the commitment scheme and requires coordinated migration.
 
@@ -53,10 +53,12 @@ The following hardening measures were added based on internal audit:
 - **P-384 ECDSA r/s non-zero**: Signature components are asserted non-zero before verification
 - **Leaf key type consistency**: `leaf_key_type` is constrained to match `cert_algorithm`
 - **VK hash transparency**: Verification key hashes are exposed as public outputs from aggregator circuits for external allowlist checking
-- **Skip flag transparency**: Content hash binding and assertion hash skip flags are public inputs
+- **Skip flag transparency**: Content hash binding and assertion hash skip flags are public inputs, constrained to binary (0 or 1)
 - **Cross-proof consistency**: Certificate validity period and content hash offset are cross-checked between ProofA and ProofB in the image aggregator
 - **Link commitment non-zero**: Prevents vacuous binding between split proofs
 - **Path depth bounds**: Selective disclosure path depth is range-checked and bounded by MAX_TREE_DEPTH
+- **JWT email domain extraction**: Takes first `@` occurrence only, preventing domain spoofing via crafted multi-`@` emails
+- **Merkle root monotonicity**: `update_merkle_root` requires strictly increasing tree size with Field-to-u64 range check
 
 ## Audit Status
 
