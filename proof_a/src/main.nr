@@ -280,13 +280,11 @@ fn main(
         assert(false, f"Invalid certificate algorithm: {cert_algorithm}");
     }
 
-    // SECURITY: Verify leaf_key_type consistency with cert_algorithm
-    if (cert_algorithm == 0) | (cert_algorithm == 4) {
-        assert(leaf_key_type == 0, "leaf_key_type must be ECDSA for ECDSA cert algorithms");
-    } else if (cert_algorithm == 1) | (cert_algorithm == 2) | (cert_algorithm == 3) {
-        assert(leaf_key_type != 0, "leaf_key_type must be RSA for RSA cert algorithms");
-    }
-    // cert_algorithm == 5 (skip) allows either leaf_key_type
+    // NOTE: cert_algorithm describes how the INTERMEDIATE cert signature is verified
+    // (e.g., RSA-2048-SHA384), while leaf_key_type describes the LEAF certificate's key type
+    // (e.g., ECDSA P-256). These are independent -- a CA can sign with RSA but issue ECDSA
+    // leaf certs (e.g., Truepic: cert_algorithm=3/RSA-2048-SHA384, leaf_key_type=0/ECDSA).
+    // No cross-check is valid here.
 
     // ================================================================
     // STEP 2: Derive Leaf Key Hash

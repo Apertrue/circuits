@@ -51,7 +51,7 @@ The following hardening measures were added based on internal audit:
 - **Boolean sign flag constraints**: `exact_lat_is_negative` and `exact_lon_is_negative` are constrained to 0 or 1
 - **Buffer length bounds checks**: `claim_length`, `assertion_length`, `sig_structure_length` are checked against their maximum buffer sizes
 - **P-384 ECDSA r/s non-zero**: Signature components are asserted non-zero before verification
-- **Leaf key type consistency**: `leaf_key_type` is constrained to match `cert_algorithm`
+- **Independent cert/leaf key types**: `cert_algorithm` (intermediate signature algorithm) and `leaf_key_type` (leaf key algorithm) are intentionally independent — a CA can sign with RSA but issue ECDSA leaf certs (e.g., Truepic: RSA-2048-SHA384 intermediate, ECDSA P-256 leaf)
 - **VK hash transparency**: Verification key hashes are exposed as public outputs from aggregator circuits for external allowlist checking
 - **Skip flag transparency**: Content hash binding and assertion hash skip flags are public inputs, constrained to binary (0 or 1)
 - **Cross-proof consistency**: Certificate validity period and content hash offset are cross-checked between ProofA and ProofB in the image aggregator
