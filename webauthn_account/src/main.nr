@@ -53,9 +53,13 @@ pub contract WebAuthnAccount {
     //   Session key: 1 (discriminator) + 2 (pubkey) + 64 (sig) = 67
     //   Use 524 (max); session key path ignores trailing zeros.
     global AUTH_WITNESS_LEN: u32 = 524;
-    // Max number of concurrent session keys per account.
-    // Used as compile-time loop bound for note iteration.
-    global MAX_SESSION_KEYS: u32 = 5;
+    // Max number of session key notes the PXE will read per query.
+    // Used as compile-time loop bound for note iteration in is_valid_impl
+    // and revoke_session_key. Higher = more headroom for orphaned notes
+    // (browser refresh loses the in-memory key but the on-chain note
+    // persists until explicitly revoked). 10 gives ample margin for
+    // typical usage while keeping circuit size reasonable.
+    global MAX_SESSION_KEYS: u32 = 10;
 
     // P-256 public key stored as an encrypted note.
     // Written once in constructor, read every time the account signs a TX.
@@ -179,9 +183,13 @@ pub contract WebAuthnAccount {
     // This TX goes through the account entrypoint (requires biometric).
     // After this, subsequent TXs can use the session key path (no biometric).
     //
-    // Auto-revokes ALL existing session key notes before inserting the new
-    // one. This prevents orphaned notes accumulating when the browser page
-    // is refreshed (in-memory key lost but on-chain note persists).
+    // INSERT-ONLY: does NOT revoke existing session key notes. In Aztec's
+    // UTXO model, atomically revoking + inserting causes nullifier conflicts
+    // when the PXE has stale state or a previous TX is still in the mempool.
+    // Stale notes are cleaned up separately via revoke_session_key() (called
+    // from the client on a best-effort basis before each new authorization).
+    // The MAX_SESSION_KEYS limit (10) provides headroom for orphaned notes
+    // between cleanup cycles.
     #[external("private")]
     fn authorize_session_key(
         pubkey_x: Field,
@@ -193,16 +201,6 @@ pub contract WebAuthnAccount {
         unsafe { set_sender_for_tags(self.address) };
 
         let owner = self.context.this_address();
-
-        // Revoke all existing session key notes (prevents orphan accumulation)
-        let mut options = ::aztec::note::note_getter_options::NoteGetterOptions::new();
-        options = options.set_limit(MAX_SESSION_KEYS);
-        let existing = self.storage.session_keys.at(owner).get_notes(options);
-        for i in 0..MAX_SESSION_KEYS {
-            if i < existing.len() {
-                self.storage.session_keys.at(owner).remove(existing.get(i));
-            }
-        }
 
         let note = SessionKeyNote { pubkey_x, pubkey_y, expiry, scope };
         self.storage.session_keys.at(owner).insert(note).deliver(
