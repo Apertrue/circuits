@@ -10,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License" />
-  <img src="https://img.shields.io/badge/noir-1.0.0--beta.19-blueviolet" alt="Noir" />
+  <img src="https://img.shields.io/badge/noir-1.0.0--beta.18-blueviolet" alt="Noir" />
   <img src="https://img.shields.io/badge/circuits-16-green" alt="Circuits" />
   <img src="https://img.shields.io/badge/contracts-2-green" alt="Contracts" />
 </p>
@@ -87,18 +87,18 @@ Apertrue uses a **split-proof architecture** that separates verification into tw
 | `aztec_verifier` | On-chain proof verification + verification record storage |
 | `webauthn_account` | WebAuthn P-256 account contract with session key support |
 
-Both target [Aztec Network](https://aztec.network/) v4 devnet.
+Both target [Aztec Network](https://aztec.network/) v4 testnet.
 
 ## Building
 
 ### Prerequisites
 
-- [Nargo](https://noir-lang.org/docs/getting_started/installation/) **v1.0.0-beta.19** (not stable — circuits depend on beta.19-specific features)
+- [Nargo](https://noir-lang.org/docs/getting_started/installation/) **v1.0.0-beta.18** (not stable — circuits depend on beta.18-specific features)
 - Docker (for Aztec contract transpilation only)
 
-> **Version constraint**: These circuits require exactly `nargo` v1.0.0-beta.19. Later versions may introduce breaking changes to the constraint system or standard library. Install with:
+> **Version constraint**: These circuits require exactly `nargo` v1.0.0-beta.18. Later versions may introduce breaking changes to the constraint system or standard library. Install with:
 > ```bash
-> noirup -v 1.0.0-beta.19
+> noirup -v 1.0.0-beta.18
 > ```
 
 ### Compile
@@ -137,7 +137,7 @@ The build script runs `bb-avm aztec_process` in Docker for AVM transpilation and
 | `bignum` | 0.9.2 | Big integer arithmetic for RSA |
 | `sha256` | 0.3.0 | SHA-256 hash computation |
 | `poseidon` | 0.1.1 | ZK-friendly Poseidon hash for commitments |
-| `bb_proof_verification` | 4.0.0-devnet.2-patch.3 | Recursive proof verification (aggregation) |
+| `bb_proof_verification` | 4.1.2 | Recursive proof verification (aggregation) |
 
 The `noir_rsa` dependency uses [zkpassport's fork](https://github.com/zkpassport/noir_rsa) which adds RSA-PSS support required for Adobe and ChatGPT-signed images. Vendored snapshots under `vendor/` may use separately pinned versions for compatibility reasons (see `vendor/noir-rsa/VENDORED_FROM.md`).
 
@@ -163,7 +163,7 @@ These circuits are built on the work of:
 - [zk-kit.noir](https://github.com/privacy-scaling-explorations/zk-kit.noir) by [Privacy & Scaling Explorations](https://pse.dev/) (Ethereum Foundation) — binary Merkle root verification
 - [Poseidon](https://github.com/noir-lang/poseidon), [SHA-256](https://github.com/noir-lang/sha256), [Schnorr](https://github.com/noir-lang/schnorr), [Base64](https://github.com/noir-lang/noir_base64) by Noir Lang — standard cryptographic primitives
 - [C2PA](https://c2pa.org/) — Coalition for Content Provenance and Authenticity open standard
-- [Aztec Network](https://aztec.network/) — private smart contract platform (v4 devnet)
+- [Aztec Network](https://aztec.network/) — private smart contract platform (v4 testnet)
 
 ## License
 
