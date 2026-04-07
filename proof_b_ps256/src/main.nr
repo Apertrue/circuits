@@ -42,9 +42,9 @@ global MERKLE_TREE_DEPTH: u32 = 8;
 global RSA_NUM_LIMBS: u32 = 18;
 
 /// Maximum size of COSE Sig_structure (CBOR encoded)
-/// Adobe Photoshop images have large protected headers (~3400 bytes) with cert chain
-/// plus claim payload (~1000 bytes), totaling ~4400 bytes. Use 5120 for safety margin.
-global MAX_SIG_STRUCTURE_SIZE: u32 = 5120;
+/// Size is dominated by DER-encoded certificate chain in protected headers.
+/// 8192 accommodates RSA-4096 chains and 4-cert enterprise chains with headroom.
+global MAX_SIG_STRUCTURE_SIZE: u32 = 8192;
 
 /// Maximum size of C2PA claim (CBOR encoded)
 global MAX_CLAIM_SIZE: u32 = 2048;

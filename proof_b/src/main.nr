@@ -55,11 +55,11 @@ global RSA_NUM_LIMBS: u32 = 18;
 
 /// Maximum size of COSE Sig_structure (CBOR encoded)
 /// Sig_structure = ["Signature1", protected_headers, external_aad, payload]
-/// ChatGPT images have large protected headers (~2000 bytes) containing full cert chain
-/// plus claim payload (~700 bytes), totaling ~2700 bytes.
-/// Adobe Photoshop images can have larger protected headers (~3400 bytes) with cert chain
-/// plus claim payload (~1000 bytes), totaling ~4400 bytes. Use 5120 for safety margin.
-global MAX_SIG_STRUCTURE_SIZE: u32 = 5120;
+/// Size is dominated by DER-encoded certificate chain in protected headers.
+/// Known sizes: ChatGPT ~2700, Adobe ~4400, CapCut ~5241 bytes.
+/// 8192 accommodates RSA-4096 chains and 4-cert enterprise chains with headroom.
+/// sha256_var only hashes actual bytes, so unused buffer costs zero constraints.
+global MAX_SIG_STRUCTURE_SIZE: u32 = 8192;
 
 /// Maximum size of C2PA claim (CBOR encoded)
 global MAX_CLAIM_SIZE: u32 = 2048;
