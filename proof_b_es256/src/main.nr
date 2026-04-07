@@ -36,9 +36,9 @@ use dep::poseidon::poseidon2::Poseidon2;
 global MERKLE_TREE_DEPTH: u32 = 8;
 
 /// Maximum size of COSE Sig_structure (CBOR encoded)
-/// ES256 images typically have smaller protected headers (~2000 bytes) than RSA
-/// but we keep the same size for compatibility
-global MAX_SIG_STRUCTURE_SIZE: u32 = 5120;
+/// Size is dominated by DER-encoded certificate chain in protected headers.
+/// 8192 accommodates RSA-4096 chains and 4-cert enterprise chains with headroom.
+global MAX_SIG_STRUCTURE_SIZE: u32 = 8192;
 
 /// Maximum size of C2PA claim (CBOR encoded)
 global MAX_CLAIM_SIZE: u32 = 2048;
