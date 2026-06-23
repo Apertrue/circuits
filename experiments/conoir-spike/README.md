@@ -32,6 +32,20 @@ and `../../co-noir-common/src/crs/*`). To re-run: clone co-snarks, `cargo build 
 co-noir`, drop `nullifier_check/` into `examples/test_vectors/`, place this script in `examples/`,
 and run it. Compile the circuit with nargo beta.20 first (`nargo execute`).
 
+## IMT non-membership primitive (2026-06-23)
+`imt_nm_mini` isolates the two operations Colofon's `check_non_membership` needs that fall in
+coNoir's risk zone (bit-decomposition based): `Field::lt` (the low-leaf range check) and
+`to_le_bits` (Merkle-path left/right selection), plus Poseidon2. Depth-8, single check,
+221 ACIR opcodes / 3845 gates.
+
+Ran under 3-party REP3 MPC -> **proof verified**. So coNoir's co-brillig/co-acvm handle those ops;
+the full Colofon IMT non-membership will port. Perf: build-proving-key ~2.0s (dominant, scales with
+circuit size), generate-proof ~0.6s, verify ~3ms, ~4s total.
+
+beta.20 migration notes for the real port: `u1` is removed (use `bool`); `to_le_bits` returns
+`[bool; N]` (Colofon's `root.nr` still uses the old `[u1; N]`).
+
 ## Next step
-Replace the toy 4-element linear scan with **Colofon's IMT non-membership** circuit run under MPC —
-that's the first real-scale version and tells us the performance story.
+Wire up the **real `colofon_imt` lib** (traits/generics + CveLeafPreimage + a real tree witness) at
+depth-32 / up to 50 checks to get the true-scale MPC proving time. Still all-local nodes so far
+(no network latency in these numbers).
