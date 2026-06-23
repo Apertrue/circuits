@@ -45,7 +45,23 @@ circuit size), generate-proof ~0.6s, verify ~3ms, ~4s total.
 beta.20 migration notes for the real port: `u1` is removed (use `bool`); `to_le_bits` returns
 `[bool; N]` (Colofon's `root.nr` still uses the old `[u1; N]`).
 
+## Depth-32 scale perf (2026-06-23)
+`imt_nm_scale` mirrors Colofon's per-component non-membership shape (leaf-preimage hash + low-leaf
+`lt` + 32-level Merkle path), batched over N checks. `bench_imt_scale.sh N` patches `CHECKS`,
+generates the witness, compiles, counts gates, and runs the timed 3-party MPC pipeline.
+
+| N (checks) | gates | witness | proving-key | proof | verify | total |
+|------------|-------|---------|-------------|-------|--------|-------|
+| 1          | 5,798 | 0.6s    | 2.3s        | 1.2s  | 29ms   | ~4.1s |
+| 50 (full)  | 153,843 | 23s   | 107s        | 30s   | 29ms   | ~160s (~2.7 min) |
+
+~3k gates per added depth-32 check; proving-key dominant + slightly super-linear; **verify constant
+29ms regardless of scale.** Full-scale double-dip ≈ 2.7 min to prove, instant to verify — fine for a
+batch/async fraud check. Caveat: all 3 MPC nodes co-located, so NO network latency in these numbers.
+
 ## Next step
-Wire up the **real `colofon_imt` lib** (traits/generics + CveLeafPreimage + a real tree witness) at
-depth-32 / up to 50 checks to get the true-scale MPC proving time. Still all-local nodes so far
-(no network latency in these numbers).
+The apertrue <-> coNoir **composition / binding**: ensure the nullifier the coNoir circuit checks is
+provably the apertrue-C2PA-authenticated one (the "authenticated" in authenticated-MPC). Leading
+approach: enforce authenticity at registry-ADD time (off-MPC single-party apertrue proof check),
+so the MPC non-membership only checks an already-authentic registry. Also open: real networked
+3-machine latency, and wiring the literal `colofon_imt` lib.
