@@ -1,0 +1,8 @@
+[package]
+name = "imt_real"
+type = "bin"
+compiler_version = ">=1.0.0"
+authors = ["Apertrue"]
+
+[dependencies]
+colofon_imt = { path = "../colofon_imt_lib" }

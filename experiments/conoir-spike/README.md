@@ -84,8 +84,20 @@ it must open the authenticated commitment.
   operators (governance) or wait for malicious-secure REP3 (not yet implemented).
 - Privacy rests on: honest-but-curious operators + no 2-of-3 collusion.
 
+## Literal colofon_imt port (2026-06-23)
+`imt_real` calls the REAL `colofon_imt` lib (`check_non_membership` + `CveLeafPreimage`), not a
+reimplementation. It compiles under nargo beta.20 and runs under 3-party coNoir MPC: `non_existence`
+proven true, verified, ~3.5s at depth-8. Confirms faithfulness end to end.
+
+The port needs exactly two migrations to the lib (against beta.20):
+1. `root.nr`: `[u1; N]` -> `[bool; N]` (and `if indices[i] == 1` -> `if indices[i]`) -- `u1` removed.
+2. `Nargo.toml`: bump the `poseidon` dep `v0.1.1` -> `v0.3.0` (v0.1.1 fails under beta.20:
+   "Comptime global RATE used in non-comptime code" + a Poseidon2::hash arity error).
+`imt_real` here depends on a beta.20-migrated copy of `colofon_imt` (lib copy not committed; the two
+migrations above are the whole delta).
+
 ## Remaining build items
-- Networked 3-machine latency (needs real infra; all numbers here are co-located, no WAN latency).
-- Wire the literal `colofon_imt` lib (faithfulness; underlying ops + perf already proven).
+- Networked 3-machine latency: NOT done -- needs real infra (3 machines / WAN). All numbers here are
+  co-located, so no network-round latency is reflected. This is an infra task, not a code task.
 - When a lighthouse is committed: graft the blinded-commitment output into production apertrue
   proof_a/proof_b (NOT done here -- a breaking change to the live proof format, premature pre-lighthouse).
