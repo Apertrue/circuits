@@ -96,8 +96,30 @@ The port needs exactly two migrations to the lib (against beta.20):
 `imt_real` here depends on a beta.20-migrated copy of `colofon_imt` (lib copy not committed; the two
 migrations above are the whole delta).
 
-## Remaining build items
-- Networked 3-machine latency: NOT done -- needs real infra (3 machines / WAN). All numbers here are
-  co-located, so no network-round latency is reflected. This is an infra task, not a code task.
-- When a lighthouse is committed: graft the blinded-commitment output into production apertrue
-  proof_a/proof_b (NOT done here -- a breaking change to the live proof format, premature pre-lighthouse).
+## Binding wrapper -- Option A (2026-06-23)
+`binding_wrapper` is the CLIENT-SIDE, off-MPC step that produces the commitment without touching
+production. It recursively verifies an apertrue proof (one branch of the aggregator, real
+`bb_proof_verification` lib, beta.18 toolchain) and emits `C = Poseidon2(public_values[2], blind)` --
+a commitment to the VERIFIED nullifier (index 2), not a free witness.
+
+Gate count: **773,025** (one recursive verify + commit). For context, apertrue's `image_aggregator`
+does 2x verify (~1.5M gates) client-side in PRODUCTION today, and proving capacity is
+`initSRSChonk(2^21)` ~2M. So the wrapper is smaller than what apertrue already proves client-side --
+recursion overhead is in-budget, not a new cost category. Compilation + gate count confirmed; full
+end-to-end prove not run (needs a real apertrue inner proof; apertrue already runs equivalent
+recursion, so it will work).
+
+### Locked architecture (CTO decision)
+coNoir double-dip is a **containerised downstream sidecar** that consumes apertrue's existing proof +
+deterministic nullifier N. It derives `C` via `binding_wrapper` (composition, NOT duplicating the
+C2PA circuit), secret-shares N into the MPC, and runs the bound non-membership. N is never blinded
+(load-bearing for dedup/SD/verification/on-chain). Production proof_a/proof_b are untouched.
+Rejected: duplicating proof_a (Option B, anti-pattern). Deferred: folding C into proof_a (Option C,
+post-lighthouse only, behind a flag -- it is a breaking format change rippling to proof_b/aggregators/
+all VKs/on-chain verifier/backend parser/client).
+
+## Remaining (non-code / deferred)
+- Networked 3-machine latency: needs real infra (3 machines / WAN). All numbers here are co-located.
+- Production graft of C into proof_a: deferred to post-lighthouse (Option C above).
+- The gating risk is now PRODUCT, not engineering: lighthouse use case + first design partner +
+  node-operator governance (which makes coNoir's semi-honest model acceptable).
