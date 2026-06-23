@@ -59,9 +59,33 @@ generates the witness, compiles, counts gates, and runs the timed 3-party MPC pi
 29ms regardless of scale.** Full-scale double-dip ≈ 2.7 min to prove, instant to verify — fine for a
 batch/async fraud check. Caveat: all 3 MPC nodes co-located, so NO network latency in these numbers.
 
-## Next step
-The apertrue <-> coNoir **composition / binding**: ensure the nullifier the coNoir circuit checks is
-provably the apertrue-C2PA-authenticated one (the "authenticated" in authenticated-MPC). Leading
-approach: enforce authenticity at registry-ADD time (off-MPC single-party apertrue proof check),
-so the MPC non-membership only checks an already-authentic registry. Also open: real networked
-3-machine latency, and wiring the literal `colofon_imt` lib.
+## Binding / authenticated-MPC seam (2026-06-23)
+`bound_nm` demonstrates the apertrue <-> coNoir binding. A public `commitment = Commit(nullifier,
+blind)` is the authenticity anchor (in the real system apertrue's C2PA proof attests it off-MPC;
+it is hiding so it leaks nothing). The party secret-shares `(nullifier, blind)`; a lightweight
+in-MPC opening check binds them to the commitment; non-membership runs on the deterministic
+secret-shared nullifier; only the collision bit is revealed. No recursive proof verification in MPC.
+
+Ran under 3-party MPC:
+- no-collision -> bit 0 (verified)
+- collision (set contains the nullifier) -> bit 1 (verified)
+- binding failure (substitute a nullifier that does NOT open the commitment) -> rejected,
+  "Assertion failed: commitment opening failed"
+
+The binding-failure case is the security property: a party cannot substitute an arbitrary nullifier;
+it must open the authenticated commitment.
+
+### Threat-model notes (from design review)
+- MPC protects the registry AT REST (1 REP3 node can't read shares). The real attack is the
+  membership ORACLE (guess a low-entropy ID, query, read the bit) -> require a C2PA-authenticated
+  query too (can only test items you authentically hold).
+- coNoir is **semi-honest** only (`mpc-core/src/lib.rs`): secure vs passive nodes, NOT vs actively
+  deviating ones. For competing institutions, either run nodes under reputable/independent/audited
+  operators (governance) or wait for malicious-secure REP3 (not yet implemented).
+- Privacy rests on: honest-but-curious operators + no 2-of-3 collusion.
+
+## Remaining build items
+- Networked 3-machine latency (needs real infra; all numbers here are co-located, no WAN latency).
+- Wire the literal `colofon_imt` lib (faithfulness; underlying ops + perf already proven).
+- When a lighthouse is committed: graft the blinded-commitment output into production apertrue
+  proof_a/proof_b (NOT done here -- a breaking change to the live proof format, premature pre-lighthouse).
