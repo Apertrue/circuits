@@ -1,0 +1,11 @@
+WAREHOUSE RECEIPT (NON-NEGOTIABLE)
+
+Operator      : Meridian Bonded Storage Ltd  (licence 7001234)
+Receipt UUID  : 7001234000042
+Commodity     : Copper Cathode, Grade A  (HS 74031100)
+Quantity      : 250.00 metric tonnes
+Deposit date  : 2024-03-15
+Location      : Bonded Warehouse 7, Rotterdam
+
+This receipt evidences collateral held on deposit and is the carrier for the
+Apertrue Quorum custodian attestation embedded as a C2PA assertion in this file.

@@ -83,6 +83,60 @@ anchor), checks the proven anchor equals the `commit_receivable` anchor for the 
 `(salt=42, role=2)`, and hands the anchor to `bound_receivables` (clean → `false`,
 double-financed → `true`).
 
+## 3b. C2PA-document adapter (warehouse receipt) — the *carrier* path
+
+The FatturaPA adapter reads canonical fields from a **native structured rail** (the
+e-invoice XML). Many collateral documents have **no such rail** — a warehouse receipt,
+a bill of lading, a deposit slip. For these, **C2PA is the load-bearing CARRIER**: the
+signed canonical fields, the signer's public key, and the signer's raw-ECDSA signature
+over `canonical_id` are embedded in a C2PA **custom assertion** and **hash-bound** to the
+document, then read back out of the manifest. C2PA transports + binds; the *trust* is the
+**signature**, verified in-circuit by Proof A — exactly as in the native-rail path.
+
+`warehouse_adapter.py` (driven end-to-end by `run_warehouse_pipeline.sh`), modes `wrap` /
+`read` / `both`:
+
+1. **Canonical fields** (warehouse receipt, four fields, same structure as receivables;
+   names are adapter-local, mapped onto the generic 4-field circuit slots):
+   - `receipt_uuid = 7001234000042` (operator licence 7001234 · 1e6 + receipt no 42) → slot 1
+   - `commodity_id = 74031100` (HS code, copper cathode grade A)               → slot 2
+   - `quantity     = 25000` (250.00 metric tonnes, centi-tonnes)               → slot 3
+   - `deposit_date = 20240315` (2024-03-15)                                    → slot 4
+   - `canonical_id = 0x20adcccdd6e2e94b4a78a2cba482c287b37c3c840204f9412d5baa1cdb11a423`
+     (computed by `commit_receivable`, salt=42, signer_role=2).
+2. **WRAP (C2PA is genuinely created).** Renders a warehouse-receipt PDF (`cupsfilter`),
+   then uses **c2pie** (the same tool as `p1_provenance/p1_next.py`) to embed a custom
+   assertion **`org.apertrue.quorum.collateral`** carrying the canonical fields, the
+   operator's `pubkey_x/y` (hex), and the **raw ECDSA P-256 signature over `canonical_id`**
+   (low-s, `r‖s` hex; §2 signing spec), plus a `c2pa.hash.data` hard binding over the whole
+   PDF. The manifest is signed with a stand-in RSA leaf→CA chain (PS256). Output:
+   `warehouse_receipt_c2pa.pdf`.
+3. **READ (C2PA is genuinely parsed).** Parses the manifest back with **c2patool**, recovers
+   `{canonical_fields, pubkey_x, pubkey_y, signature, signer_role}`, **re-derives**
+   `canonical_id` from the *recovered* fields and asserts it equals the embedded value, and
+   emits `warehouse_adapter_object.json` (the **same interface shape** as fattura).
+4. **Trust root + Proof A.** `_mkroot` builds the depth-8 Poseidon2 root from the operator
+   `(x, y, role=2)` leaf; `proof_a_receivable` does the **in-circuit ECDSA verify + trust-list
+   membership** over the C2PA-carried fields and emits the anchor; the proven anchor equals the
+   `commit_receivable` anchor `0x2f458e5a…7744`.
+5. **Handoff.** The anchor feeds `bound_receivables` (accepted_roles `[1,2]`): `financed`
+   without the cid → `(false, 0x02)`, then with the cid → `(true, 0x02)` — anchor opens cleanly.
+
+The exact carrier commands (proving C2PA is exercised, not faked):
+- **wrap**: `c2pie_GenerateManifest([CustomJsonAssertion("org.apertrue.quorum.collateral", …),
+  c2pie_GenerateHashDataAssertion(…)], rsa_leaf.key, rsa_chain.pem)` →
+  `c2pie_EmplaceManifest(C2PA_ContentTypes.pdf, …)` (in `warehouse_adapter.py wrap`).
+- **read**: `c2patool warehouse_receipt_c2pa.pdf` → JSON → pull the
+  `org.apertrue.quorum.collateral` assertion (in `warehouse_adapter.py read`).
+
+### Caveats specific to this adapter
+- The **warehouse-operator P-256 key is a STAND-IN** (`adapters/keys/operator_standin.key`);
+  the real operator/custodian key is the partner crux (same security note as §4.1).
+- The **C2PA manifest signer is a stand-in RSA leaf→CA chain** (`adapters/keys/c2pa_leaf.*`,
+  PS256); c2pie is the carrier tool. A production manifest would chain to a real C2PA CA.
+- Proof A trusts the operator **leaf key directly** via the trust list (Poseidon2 `(x,y,role)`
+  leaf → root), not an in-circuit X.509 chain — the same §4.2 follow-up applies.
+
 ## 4. Honest caveats (follow-ups for a design partner)
 
 1. **The obligor key is a STAND-IN.** The real obligor private key (an Agenzia delle
@@ -102,7 +156,13 @@ double-financed → `true`).
 
 ## 5. Files
 
-- `adapters/fattura_adapter.py`        — the FatturaPA adapter (XML → interface object).
+- `adapters/fattura_adapter.py`        — the FatturaPA adapter (native XML → interface object).
 - `adapters/run_fattura_pipeline.sh`   — full end-to-end runner (idempotent).
 - `adapters/fattura_adapter_object.json` — the emitted interface object for this invoice.
-- `adapters/keys/obligor_standin.*`    — minted stand-in obligor key+cert (gitignore-worthy).
+- `adapters/keys/obligor_standin.*`    — minted stand-in obligor key+cert (gitignored).
+- `adapters/warehouse_adapter.py`      — the C2PA warehouse-receipt adapter (C2PA assertion → interface object); modes wrap/read/both. Needs a python with `c2pie`+`pypdf`.
+- `adapters/run_warehouse_pipeline.sh` — full end-to-end runner (idempotent); auto-detects a c2pie python (or set `C2PIE_PY`).
+- `adapters/warehouse_adapter_object.json` — the emitted interface object (recovered from the C2PA manifest).
+- `adapters/warehouse_receipt.pdf` / `warehouse_receipt_c2pa.pdf` — the rendered receipt and its C2PA-signed form.
+- `adapters/keys/operator_standin.*`   — minted stand-in warehouse-operator P-256 key+cert (gitignored).
+- `adapters/keys/c2pa_leaf.* / c2pa_ca.*` — minted stand-in RSA chain that signs the C2PA manifest (gitignored).

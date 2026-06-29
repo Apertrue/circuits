@@ -1,9 +1,9 @@
-candidate_anchor = "0x108137c71e47833c5655288aea2160955230af60e82c0d0fd4f9d8297c912d0b"
+candidate_anchor = "0x2f458e5aee3d011eebd93c81e310de32f13892134be3f27c7fccac4d1cef7744"
 signer_role = "2"
 accepted_roles = ["1", "2"]
-invoice_uuid = "1234567890000123"
-debtor_id = "9876543210"
-amount = "500"
-issue_date = "20141218"
+invoice_uuid = "7001234000042"
+debtor_id = "74031100"
+amount = "25000"
+issue_date = "20240315"
 salt = "42"
-financed = ["0x01","0x02","0x06cc60c66ce6389ea53783b55dc5ff1b480e9a43ecf4c942262f5d73d7a87280","0x04","0x05","0x06"]
+financed = ["0x01","0x02","0x20adcccdd6e2e94b4a78a2cba482c287b37c3c840204f9412d5baa1cdb11a423","0x04","0x05","0x06"]
