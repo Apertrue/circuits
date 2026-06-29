@@ -1,0 +1,17 @@
+# PUBLIC anchors (from commit_aggregate): three insurer lines + the valuer-signed value
+line_anchor = [
+  "0x162ae25928e5b1c2372c7b47384f715830e9e5612c6e5c343edb434457f3a412",
+  "0x15a0acd5bdada247adb810cc90b356d1be9f9a9fc00e57341821401f0871407c",
+  "0x23cff3f18aaf298b6d50f1559a48e48bcdb15aa018098cf50847bdaab7474a91",
+]
+value_anchor = "0x2a5aa4535b0dfa2c0922bf221b329388d5e02b68dc190893ae02ae0190da0389"
+accepted_line_role  = "3"
+accepted_value_role = "4"
+
+# PRIVATE (secret-shared): the lines and the agreed value
+line      = ["20000000", "25000000", "10000000"]   # sum = 55,000,000
+line_salt = ["0xa1a1a1a1a1a1a1a1", "0xa2a2a2a2a2a2a2a2", "0xa3a3a3a3a3a3a3a3"]
+line_role = ["3", "3", "3"]
+agreed_value = "50000000"                           # 55M > 50M -> over-insured
+value_salt   = "0xb1b1b1b1b1b1b1b1"
+value_role   = "4"

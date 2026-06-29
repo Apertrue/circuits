@@ -1,0 +1,7 @@
+{
+  "@context": "https://schema.org",
+  "@type": "CreativeWork",
+  "author": [{"@type": "Organization", "name": "IT-SdI (Agenzia delle Entrate) STAND-IN"}],
+  "copyrightYear": "2014",
+  "copyrightHolder": "SOCIETA' ALPHA SRL / FatturaPA no.123"
+}

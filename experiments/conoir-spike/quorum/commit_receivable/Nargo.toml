@@ -1,0 +1,9 @@
+[package]
+name = "commit_receivable"
+type = "bin"
+authors = ["Apertrue"]
+compiler_version = ">=1.0.0"
+description = "Quorum Layer 1: produce (canonical_id, authenticity anchor) for a receivable, off-MPC."
+
+[dependencies]
+poseidon = { tag = "v0.3.0", git = "https://github.com/noir-lang/poseidon" }

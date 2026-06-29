@@ -1,0 +1,23 @@
+{
+  "alg": "es256",
+  "claim_generator": "Apertrue_Quorum/0.1",
+  "title": "FatturaPA IT01234567890 no.123 (SdI-cleared)",
+  "assertions": [
+    {
+      "label": "org.apertrue.quorum.receivable",
+      "data": {
+        "scheme": "FatturaPA",
+        "clearance_authority": "IT-SdI (Agenzia delle Entrate) [STAND-IN CERT]",
+        "supplier_vat": "IT01234567890",
+        "debtor_cf": "09876543210",
+        "invoice_number": "123",
+        "issue_date": "2014-12-18",
+        "amount_cents": 500,
+        "currency": "EUR",
+        "canonical_id": "0x06cc60c66ce6389ea53783b55dc5ff1b480e9a43ecf4c942262f5d73d7a87280",
+        "anchor": "0x015dac177e4952c70e1161e5478ab76817250fa1d521e258e505cfea9c1648a3",
+        "clearance_signature_es256_b64": "MEUCIE8Lt17Ckbq46L+W+P8tGxedIAyw1XUHHTttK7klv3BhAiEAuWe80/n/W8ON91DUrwCdKnCkqoswXneGKrPnZrHJHkg="
+      }
+    }
+  ]
+}

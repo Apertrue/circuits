@@ -1,0 +1,9 @@
+[package]
+name = "bound_receivables"
+type = "bin"
+authors = ["Apertrue"]
+compiler_version = ">=1.0.0"
+description = "Apertrue Quorum: authenticated double-financing check across lenders' books under MPC. Reveals only the already-financed bit."
+
+[dependencies]
+poseidon = { tag = "v0.3.0", git = "https://github.com/noir-lang/poseidon" }
