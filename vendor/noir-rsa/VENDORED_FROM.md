@@ -2,7 +2,7 @@
 
 - **Source**: https://github.com/zkpassport/noir_rsa
 - **Version**: v0.9.1 (with sha512 bumped to v0.1.1 for beta.19 compatibility)
-- **License**: MIT (https://github.com/zkpassport/noir_rsa/blob/main/LICENSE)
+- **License**: Apache-2.0 (https://github.com/zkpassport/noir_rsa/blob/main/LICENSE)
 - **Authors**: [zkpassport](https://zkpassport.id/)
 
 ## Modifications

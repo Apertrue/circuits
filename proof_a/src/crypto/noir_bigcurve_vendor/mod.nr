@@ -399,12 +399,6 @@ fn msm_with_hint_internal<let Size: u32, let NScalarSlices: u32, let NTranscript
 
     // Init the accumulator from the most significant scalar slice
     let mut accumulator: P = P::offset_generator();
-// Internal function calls - removing 'crate::' which refers to package root, using local scope
-// or fully qualified path if needed. Since these are in 'mod.nr', they are local to the module (or siblings).
-// But wait, 'incomplete_add_with_hint' is defined in this file. So we can just call it directly.
-
-    // Init the accumulator from the most significant scalar slice
-    let mut accumulator: P = P::offset_generator();
     let mut accumulator = incomplete_add_with_hint::<B, P>(
         accumulator,
         tables[0].get::<P>(scalars[0].base4_slices[0] as u32),
@@ -451,15 +445,6 @@ fn msm_with_hint_internal<let Size: u32, let NScalarSlices: u32, let NTranscript
     
     accumulator
 }
-
-// ... (other functions)
-
-// Fixing sub_with_hint calls (Line 868 and 886)
-// Wait, 'sub_with_hint' is defined in this file. So just call 'sub_with_hint'.
-// But in the macro (lines 197, 222), it might be expanded in a different context.
-// The macro uses '$crate::crypto::noir_bigcurve_vendor::sub_with_hint' which is correct.
-// But the functions 'msm_with_hint_internal' etc are regular functions in the module.
-// They should call siblings without 'crate::'.
 
 pub(crate) fn conditional_incomplete_add_with_hint<B: BigNum, P: BigCurve<B>>(
     point: P,
