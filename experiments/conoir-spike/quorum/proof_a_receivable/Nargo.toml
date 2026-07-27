@@ -1,0 +1,9 @@
+[package]
+name = "proof_a_receivable"
+type = "bin"
+authors = ["Apertrue"]
+compiler_version = ">=1.0.0"
+description = "Quorum Proof A: in-circuit verification that a trusted, role-bound signer signed canonical_id; emits the role-stamped authenticity anchor."
+
+[dependencies]
+poseidon = { tag = "v0.3.0", git = "https://github.com/noir-lang/poseidon" }

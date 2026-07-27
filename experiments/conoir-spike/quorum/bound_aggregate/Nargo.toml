@@ -1,0 +1,9 @@
+[package]
+name = "bound_aggregate"
+type = "bin"
+authors = ["Apertrue"]
+compiler_version = ">=1.0.0"
+description = "Apertrue Quorum aggregate engine: sum secret-shared insurer lines against a valuer-signed agreed value under MPC. Reveals only the over-insured bit."
+
+[dependencies]
+poseidon = { tag = "v0.3.0", git = "https://github.com/noir-lang/poseidon" }

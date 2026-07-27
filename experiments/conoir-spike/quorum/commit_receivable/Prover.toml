@@ -1,0 +1,6 @@
+invoice_uuid = "7001234000042"
+debtor_id    = "74031100"
+amount       = "25000"
+issue_date   = "20240315"
+salt         = "42"
+signer_role  = "2"

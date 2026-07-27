@@ -1,0 +1,7 @@
+# Bound double-dip, no-collision case. nullifier 42 opens the commitment.
+# Collision: add "42" to existing. Binding-failure: change nullifier to a value
+# that does not open the commitment -> "commitment opening failed".
+nullifier = "42"
+blind = "12345"
+commitment = "0x03f0661cae8bd60726876aa42536ef1d790c866dc3312872471385c22d1d44ff"
+existing = ["10", "11", "12", "13"]

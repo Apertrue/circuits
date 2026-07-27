@@ -1,0 +1,9 @@
+[package]
+name = "commit_aggregate"
+type = "bin"
+authors = ["Apertrue"]
+compiler_version = ">=1.0.0"
+description = "Quorum aggregate engine: produce role-stamped anchors for insurer lines and the valuer-signed agreed value, off-MPC."
+
+[dependencies]
+poseidon = { tag = "v0.3.0", git = "https://github.com/noir-lang/poseidon" }

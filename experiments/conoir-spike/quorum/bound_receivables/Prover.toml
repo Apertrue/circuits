@@ -1,0 +1,9 @@
+candidate_anchor = "0x2f458e5aee3d011eebd93c81e310de32f13892134be3f27c7fccac4d1cef7744"
+signer_role = "2"
+accepted_roles = ["1", "2"]
+invoice_uuid = "7001234000042"
+debtor_id = "74031100"
+amount = "25000"
+issue_date = "20240315"
+salt = "42"
+financed = ["0x01","0x02","0x20adcccdd6e2e94b4a78a2cba482c287b37c3c840204f9412d5baa1cdb11a423","0x04","0x05","0x06"]

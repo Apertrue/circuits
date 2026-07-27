@@ -1,0 +1,5 @@
+invoice_uuid = "1234567890000123"
+debtor_id    = "9876543210"
+amount        = "500"
+issue_date   = "20141218"
+salt         = "0x7777777777777777"
