@@ -36,6 +36,7 @@ jobs:
           - proof_b_es256_v2_core
           - proof_b_es256_v2
           - proof_b_es256_v2_large
+          - proof_b_ps256_v2
           - image_aggregator
           - tree_aggregator
           - selective_disclosure

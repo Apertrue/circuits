@@ -29,11 +29,13 @@
 /// - Dates before 1970-01-01 are rejected (unix time is unsigned here).
 
 use dep::sha256::sha256_var;
+use std::hash::pedersen_hash;
 use dep::sha512::{sha384::sha384_var, sha512::sha512_var};
 
 pub mod test_vectors;
 pub mod synthetic_vectors;
 pub mod proofmode_vectors;
+pub mod rsa_vectors;
 
 /// Uncompressed P-256 SubjectPublicKeyInfo header (27 bytes), followed by
 /// X (32 bytes) and Y (32 bytes).
@@ -261,6 +263,121 @@ pub fn bind_leaf_cert_sha512<let N: u32>(tbs: [u8; N], tbs_len: u32) -> LeafCert
     LeafCertSha512 { sha512, pubkey_x, pubkey_y, not_before: w.not_before, not_after: w.not_after }
 }
 
+// --------------------------------------------------------------------
+// RSA keys and leaf key hashing
+// --------------------------------------------------------------------
+
+/// RSA-2048 rsaEncryption SubjectPublicKeyInfo header (33 bytes): SPKI
+/// SEQUENCE(290), AlgorithmIdentifier rsaEncryption NULL, BIT STRING(271),
+/// RSAPublicKey SEQUENCE(266), INTEGER(257) with a 0x00 sign byte. Then the
+/// 256-byte modulus and INTEGER 65537 (02 03 01 00 01). Total 294 bytes.
+global SPKI_RSA2048_PREFIX: [u8; 33] = [
+    0x30, 0x82, 0x01, 0x22, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01,
+    0x01, 0x01, 0x05, 0x00, 0x03, 0x82, 0x01, 0x0f, 0x00, 0x30, 0x82, 0x01, 0x0a, 0x02, 0x82,
+    0x01, 0x01, 0x00,
+];
+global RSA_E65537: [u8; 5] = [0x02, 0x03, 0x01, 0x00, 0x01];
+
+/// DER content of AlgorithmIdentifier sha256WithRSAEncryption
+/// (OID 1.2.840.113549.1.1.11, NULL parameters).
+pub global ALG_RSA_SHA256: [u8; 13] =
+    [0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00];
+
+/// Read an RSA-2048 rsaEncryption SubjectPublicKeyInfo at spki_start and
+/// return the big-endian modulus. The modulus must have its top bit set
+/// (exactly 2048 bits) and the public exponent must be 65537.
+pub fn read_rsa2048_spki<let N: u32>(tbs: [u8; N], tbs_len: u32, spki_start: u32) -> [u8; 256] {
+    assert(spki_start + 294 <= tbs_len, "SPKI exceeds tbs_len");
+    for i in 0..33 {
+        assert(tbs[spki_start + i] == SPKI_RSA2048_PREFIX[i], "SPKI is not RSA-2048 rsaEncryption");
+    }
+    let mut modulus: [u8; 256] = [0; 256];
+    for i in 0..256 {
+        modulus[i] = tbs[spki_start + 33 + i];
+    }
+    assert(modulus[0] >= 0x80, "RSA modulus is not 2048 bits");
+    for i in 0..5 {
+        assert(tbs[spki_start + 289 + i] == RSA_E65537[i], "RSA exponent is not 65537");
+    }
+    modulus
+}
+
+/// Big-endian bytes to noir-bignum limbs (120-bit limbs, least significant
+/// first). Each limb is built from at most 15 bytes, so it is < 2^120.
+pub fn be_bytes_to_limbs<let NB: u32, let NL: u32>(bytes: [u8; NB]) -> [u128; NL] {
+    assert(NL * 15 >= NB, "too few limbs");
+    let mut limbs: [u128; NL] = [0; NL];
+    for i in 0..NL {
+        let mut limb: Field = 0;
+        for j in 0..15 {
+            // byte index from the most significant end of limb i
+            let k = 15 * i + 14 - j; // little-endian byte position
+            if k < NB {
+                limb = limb * 256 + bytes[NB - 1 - k] as Field;
+            }
+        }
+        limbs[i] = limb as u128;
+    }
+    limbs
+}
+
+/// Key hash of an RSA public key for nullifiers and trust-list leaves:
+/// pedersen_hash over ALL modulus limbs (v1 hashed only the 8 low limbs,
+/// which an attacker can match with a modulus they can factor).
+pub fn rsa_key_hash<let NB: u32, let NL: u32>(modulus: [u8; NB]) -> Field {
+    let limbs: [u128; NL] = be_bytes_to_limbs(modulus);
+    let mut f: [Field; NL] = [0; NL];
+    for i in 0..NL {
+        f[i] = limbs[i] as Field;
+    }
+    pedersen_hash(f)
+}
+
+/// Key hash of a P-256 public key, as in the v2 circuits:
+/// pedersen_hash([x as Field, y as Field]).
+pub fn p256_key_hash(x: [u8; 32], y: [u8; 32]) -> Field {
+    let mut xf: Field = 0;
+    let mut yf: Field = 0;
+    for i in 0..32 {
+        xf = xf * 256 + x[i] as Field;
+        yf = yf * 256 + y[i] as Field;
+    }
+    pedersen_hash([xf, yf])
+}
+
+/// A leaf whose key is P-256 or RSA-2048, identified by key hash.
+pub struct LeafCertAnyKey {
+    pub sha256: [u8; 32],
+    /// 0 = P-256 (key_hash = p256_key_hash), 1 = RSA-2048 (key_hash = rsa_key_hash, 18 limbs)
+    pub key_type: u8,
+    pub key_hash: Field,
+    pub not_before: u64,
+    pub not_after: u64,
+}
+
+/// Hash (SHA-256) and parse a DER TBSCertificate signed with
+/// sha256WithRSAEncryption whose subject key is either uncompressed P-256 or
+/// RSA-2048/65537. The key type is read from the SPKI DER itself (P-256 SPKI
+/// is SEQUENCE(89), RSA-2048 is SEQUENCE(290)); it is not a prover choice.
+pub fn bind_leaf_cert_rsa_signed<let N: u32>(tbs: [u8; N], tbs_len: u32) -> LeafCertAnyKey {
+    assert(tbs_len <= N, "tbs_len exceeds buffer");
+    let sha256: [u8; 32] = sha256_var(tbs, tbs_len);
+    let w = walk_tbs(tbs, tbs_len);
+    assert_sig_alg(tbs, w, ALG_RSA_SHA256);
+    let is_p256 = tbs[w.spki_start + 1] == 0x59;
+    let mut key_hash: Field = 0;
+    let mut key_type: u8 = 0;
+    if is_p256 {
+        let (x, y) = read_p256_spki(tbs, tbs_len, w.spki_start);
+        key_hash = p256_key_hash(x, y);
+    } else {
+        let m = read_rsa2048_spki(tbs, tbs_len, w.spki_start);
+        key_hash = rsa_key_hash::<256, 18>(m);
+        key_type = 1;
+    }
+    LeafCertAnyKey { sha256, key_type, key_hash, not_before: w.not_before, not_after: w.not_after }
+}
+
 /// Hash and parse a DER TBSCertificate whose subject key is P-256.
 /// This body is kept as originally written (rather than calling walk_tbs)
 /// so the compiled v2 circuits, and their verification keys, do not change.
@@ -314,6 +431,8 @@ pub fn bind_leaf_cert<let N: u32>(tbs: [u8; N], tbs_len: u32) -> LeafCert {
 mod tests {
     use super::{bind_leaf_cert, bind_leaf_cert_sha384, bind_leaf_cert_sha512, days_from_civil, LeafCert};
     use super::proofmode_vectors as pm;
+    use super::rsa_vectors as rv;
+    use super::{bind_leaf_cert_rsa_signed, be_bytes_to_limbs, rsa_key_hash, p256_key_hash};
     use super::test_vectors as tv;
     use super::synthetic_vectors as sv;
 
@@ -533,5 +652,76 @@ mod tests {
     #[test(should_fail_with = "TBS signature algorithm mismatch")]
     fn test_sha512_rejects_sha256_signed_leaf() {
         let _ = bind_leaf_cert_sha512(pad(tv::LEICA_LEAF_TBS), tv::LEICA_LEAF_TBS_LEN);
+    }
+
+    #[test]
+    fn test_be_bytes_to_limbs() {
+        let mut b: [u8; 256] = [0; 256];
+        b[255] = 0x01;
+        b[240] = 0x02; // byte 15 from the end: lowest byte of limb 1
+        b[0] = 0x80; // top byte: limb 17 (2048 = 17 * 120 + 8)
+        let l: [u128; 18] = be_bytes_to_limbs(b);
+        assert(l[0] == 1);
+        assert(l[1] == 2);
+        assert(l[17] == 0x80);
+        for i in 2..17 {
+            assert(l[i] == 0);
+        }
+    }
+
+    #[test]
+    fn test_rsa_leaf_by_rsa_ca_binds_modulus() {
+        let c = bind_leaf_cert_rsa_signed(pad(rv::SYN_RSA_LEAF_BY_RSA2048_TBS), rv::SYN_RSA_LEAF_BY_RSA2048_TBS_LEN);
+        assert(c.sha256 == rv::SYN_RSA_LEAF_BY_RSA2048_SHA256);
+        assert(c.key_type == 1);
+        assert(c.key_hash == rsa_key_hash::<256, 18>(rv::SYN_RSA_LEAF_MODULUS));
+        assert(c.not_before == rv::SYN_RSA_LEAF_BY_RSA2048_NOT_BEFORE);
+        assert(c.not_after == rv::SYN_RSA_LEAF_BY_RSA2048_NOT_AFTER);
+    }
+
+    #[test]
+    fn test_p256_leaf_by_rsa_ca_binds_key() {
+        let c = bind_leaf_cert_rsa_signed(pad(rv::SYN_P256_LEAF_BY_RSA2048_TBS), rv::SYN_P256_LEAF_BY_RSA2048_TBS_LEN);
+        assert(c.key_type == 0);
+        assert(c.key_hash == p256_key_hash(rv::SYN_EC_LEAF_PUB_X, rv::SYN_EC_LEAF_PUB_Y));
+    }
+
+    #[test]
+    fn test_adobe_rsa_leaf_binds_modulus() {
+        // Real Adobe leaf: RSA-2048 key, signed sha256WithRSAEncryption.
+        let c = bind_leaf_cert_rsa_signed(pad(tv::ADOBE_LEAF_TBS), tv::ADOBE_LEAF_TBS_LEN);
+        assert(c.sha256 == tv::ADOBE_LEAF_SHA256);
+        assert(c.key_type == 1);
+        assert(c.key_hash == rsa_key_hash::<256, 18>(rv::ADOBE_LEAF_MODULUS));
+        assert(c.not_before == tv::ADOBE_LEAF_NOT_BEFORE);
+        assert(c.not_after == tv::ADOBE_LEAF_NOT_AFTER);
+    }
+
+    #[test(should_fail_with = "RSA exponent is not 65537")]
+    fn test_rsa_exponent_altered() {
+        let mut t = pad(rv::SYN_RSA_LEAF_BY_RSA2048_TBS);
+        let mut off: u32 = 0;
+        for i in 0..400 {
+            if (off == 0) & (t[i] == 0x30) & (t[i + 1] == 0x82) & (t[i + 2] == 0x01) & (t[i + 3] == 0x22) {
+                off = i;
+            }
+        }
+        assert(off != 0);
+        t[off + 293] = 0x03;
+        let _ = bind_leaf_cert_rsa_signed(t, rv::SYN_RSA_LEAF_BY_RSA2048_TBS_LEN);
+    }
+
+    #[test(should_fail_with = "TBS signature algorithm mismatch")]
+    fn test_rsa_path_rejects_ecdsa_signed_leaf() {
+        let _ = bind_leaf_cert_rsa_signed(pad(tv::LEICA_LEAF_TBS), tv::LEICA_LEAF_TBS_LEN);
+    }
+
+    #[test]
+    fn test_rsa_key_hash_differs_in_high_limbs() {
+        // v1 hashed only limbs 0..8; here a change in the top byte must move the hash.
+        let mut m = rv::SYN_RSA_LEAF_MODULUS;
+        let h1 = rsa_key_hash::<256, 18>(m);
+        m[0] = m[0] ^ 0x01;
+        assert(h1 != rsa_key_hash::<256, 18>(m));
     }
 }
