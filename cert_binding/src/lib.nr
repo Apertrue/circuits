@@ -33,6 +33,7 @@ use dep::sha512::{sha384::sha384_var, sha512::sha512_var};
 
 pub mod test_vectors;
 pub mod synthetic_vectors;
+pub mod proofmode_vectors;
 
 /// Uncompressed P-256 SubjectPublicKeyInfo header (27 bytes), followed by
 /// X (32 bytes) and Y (32 bytes).
@@ -311,7 +312,8 @@ pub fn bind_leaf_cert<let N: u32>(tbs: [u8; N], tbs_len: u32) -> LeafCert {
 // ====================================================================
 
 mod tests {
-    use super::{bind_leaf_cert, bind_leaf_cert_sha384, days_from_civil, LeafCert};
+    use super::{bind_leaf_cert, bind_leaf_cert_sha384, bind_leaf_cert_sha512, days_from_civil, LeafCert};
+    use super::proofmode_vectors as pm;
     use super::test_vectors as tv;
     use super::synthetic_vectors as sv;
 
@@ -516,5 +518,20 @@ mod tests {
     fn test_sha384_rejects_sha256_signed_leaf() {
         // Samsung leaf is signed ecdsa-with-SHA256; the SHA-384 path must refuse it.
         let _ = bind_leaf_cert_sha384(pad(tv::SAMSUNG_LEAF_TBS), tv::SAMSUNG_LEAF_TBS_LEN);
+    }
+
+    #[test]
+    fn test_sha512_proofmode_leaf_binds() {
+        let c = bind_leaf_cert_sha512(pad(pm::PROOFMODE_LEAF_TBS), pm::PROOFMODE_LEAF_TBS_LEN);
+        assert(c.sha512 == pm::PROOFMODE_LEAF_SHA512, "sha512 mismatch");
+        assert(c.pubkey_x == pm::PROOFMODE_LEAF_PUB_X);
+        assert(c.pubkey_y == pm::PROOFMODE_LEAF_PUB_Y);
+        assert(c.not_before == pm::PROOFMODE_LEAF_NOT_BEFORE);
+        assert(c.not_after == pm::PROOFMODE_LEAF_NOT_AFTER);
+    }
+
+    #[test(should_fail_with = "TBS signature algorithm mismatch")]
+    fn test_sha512_rejects_sha256_signed_leaf() {
+        let _ = bind_leaf_cert_sha512(pad(tv::LEICA_LEAF_TBS), tv::LEICA_LEAF_TBS_LEN);
     }
 }
