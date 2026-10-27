@@ -571,7 +571,7 @@ mod cert_tests {
     use super::chatgpt_vectors as cv;
     use dep::cert_binding::test_vectors as tv;
     use dep::cert_binding::rsa_vectors as rv;
-    use dep::cert_binding::{bind_leaf_cert_rsa_signed_sha384, p256_key_hash};
+    use dep::cert_binding::{bind_leaf_cert_rsa_signed_sha384, p256_key_hash, rsa_key_hash};
 
     fn pad<let M: u32>(a: [u8; M]) -> [u8; MAX_TBS_SIZE] {
         let mut out: [u8; MAX_TBS_SIZE] = [0; MAX_TBS_SIZE];
@@ -593,6 +593,13 @@ mod cert_tests {
         assert(leaf.key_type == 0);
         assert(leaf.key_hash == p256_key_hash(cv::CHATGPT_LEAF_PUB_X, cv::CHATGPT_LEAF_PUB_Y));
         assert(leaf.not_before < leaf.not_after);
+    }
+
+    #[test]
+    fn test_chatgpt_ca_trust_list_leaf() {
+        // The trust-list bundle v2 leaf for WebClaimSigningCA.
+        let leaf = rsa_key_hash::<256, 18>(cv::CHATGPT_CA_MODULUS);
+        assert(leaf == 0x071fa0bd01954392bc85b9fbe4ae6e750382fe394cfe76322ba9aadec8d772d9);
     }
 
     // noir_rsa's PKCS#1 v1.5 check fails unlabelled assertions rather than
