@@ -1,0 +1,9 @@
+[package]
+name = "apertrue_proof_b_es256_v2"
+type = "bin"
+authors = ["Apertrue"]
+compiler_version = ">=1.0.0"
+description = "ProofB ES256 v2 (sig_structure 3072, claim 1280): COSE ES256 proof paired with ProofA v2"
+
+[dependencies]
+proof_b_es256_v2_core = { path = "../proof_b_es256_v2_core" }
