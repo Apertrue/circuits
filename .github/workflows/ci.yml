@@ -33,6 +33,7 @@ jobs:
           - proof_a_ecdsa_p384_v2
           - proof_a_ecdsa_p384_sha384_v2
           - proof_a_skip_v2
+          - proof_a_rsa_2048_v2
           - proof_b_es256_v2_core
           - proof_b_es256_v2
           - proof_b_es256_v2_large
