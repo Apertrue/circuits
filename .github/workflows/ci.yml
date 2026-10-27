@@ -28,6 +28,12 @@ jobs:
           - proof_b
           - proof_b_es256
           - proof_b_ps256
+          - cert_binding
+          - proof_a_ecdsa_p256_v2
+          - proof_a_ecdsa_p384_v2
+          - proof_b_es256_v2_core
+          - proof_b_es256_v2
+          - proof_b_es256_v2_large
           - image_aggregator
           - tree_aggregator
           - selective_disclosure
