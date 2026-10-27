@@ -30,7 +30,7 @@
 
 use dep::sha256::sha256_var;
 
-mod test_vectors;
+pub mod test_vectors;
 
 /// Uncompressed P-256 SubjectPublicKeyInfo header (27 bytes), followed by
 /// X (32 bytes) and Y (32 bytes).

@@ -1,0 +1,15 @@
+[package]
+name = "apertrue_proof_a_ecdsa_p256_v2"
+type = "bin"
+authors = ["Apertrue"]
+compiler_version = ">=1.0.0"
+description = "ProofA ECDSA P-256 v2: leaf key and validity bound to the CA-signed TBSCertificate"
+
+[dependencies]
+# Leaf TBSCertificate hashing and DER walk
+cert_binding = { path = "../cert_binding" }
+# ECDSA P-256 uses std::ecdsa_secp256r1 - no external deps needed
+# SHA-256 for hash chain verification
+sha256 = { tag = "v0.3.0", git = "https://github.com/noir-lang/sha256" }
+# Poseidon for commitment schemes
+poseidon = { tag = "v0.1.1", git = "https://github.com/noir-lang/poseidon" }
