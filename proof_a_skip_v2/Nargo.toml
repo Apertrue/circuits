@@ -1,0 +1,14 @@
+[package]
+name = "apertrue_proof_a_skip_v2"
+type = "bin"
+authors = ["Apertrue"]
+compiler_version = ">=1.0.0"
+description = "ProofA Skip v2: 2-cert chain (ProofMode). P-256 root signs the P-256 leaf with ecdsa-with-SHA512; leaf key and validity bound to that TBS"
+
+[dependencies]
+# Leaf TBSCertificate hashing (SHA-512) and DER walk
+cert_binding = { path = "../cert_binding" }
+# SHA-256 for hash chain verification
+sha256 = { tag = "v0.3.0", git = "https://github.com/noir-lang/sha256" }
+# Poseidon for commitment schemes
+poseidon = { tag = "v0.1.1", git = "https://github.com/noir-lang/poseidon" }
