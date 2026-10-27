@@ -378,6 +378,43 @@ pub fn bind_leaf_cert_rsa_signed<let N: u32>(tbs: [u8; N], tbs_len: u32) -> Leaf
     LeafCertAnyKey { sha256, key_type, key_hash, not_before: w.not_before, not_after: w.not_after }
 }
 
+/// DER content of AlgorithmIdentifier sha384WithRSAEncryption
+/// (OID 1.2.840.113549.1.1.12, NULL parameters).
+pub global ALG_RSA_SHA384: [u8; 13] =
+    [0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0c, 0x05, 0x00];
+
+/// A P-256 or RSA-2048 leaf whose issuer signed with sha384WithRSAEncryption.
+pub struct LeafCertAnyKeySha384 {
+    pub sha384: [u8; 48],
+    /// 0 = P-256 (key_hash = p256_key_hash), 1 = RSA-2048 (key_hash = rsa_key_hash, 18 limbs)
+    pub key_type: u8,
+    pub key_hash: Field,
+    pub not_before: u64,
+    pub not_after: u64,
+}
+
+/// As bind_leaf_cert_rsa_signed, for a TBSCertificate signed with
+/// sha384WithRSAEncryption (e.g. the Truepic CA behind ChatGPT images). The
+/// digest is SHA-384 and the key type is read from the SPKI DER.
+pub fn bind_leaf_cert_rsa_signed_sha384<let N: u32>(tbs: [u8; N], tbs_len: u32) -> LeafCertAnyKeySha384 {
+    assert(tbs_len <= N, "tbs_len exceeds buffer");
+    let sha384 = tbs_sha384(tbs, tbs_len);
+    let w = walk_tbs(tbs, tbs_len);
+    assert_sig_alg(tbs, w, ALG_RSA_SHA384);
+    let is_p256 = tbs[w.spki_start + 1] == 0x59;
+    let mut key_hash: Field = 0;
+    let mut key_type: u8 = 0;
+    if is_p256 {
+        let (x, y) = read_p256_spki(tbs, tbs_len, w.spki_start);
+        key_hash = p256_key_hash(x, y);
+    } else {
+        let m = read_rsa2048_spki(tbs, tbs_len, w.spki_start);
+        key_hash = rsa_key_hash::<256, 18>(m);
+        key_type = 1;
+    }
+    LeafCertAnyKeySha384 { sha384, key_type, key_hash, not_before: w.not_before, not_after: w.not_after }
+}
+
 /// Hash and parse a DER TBSCertificate whose subject key is P-256.
 /// This body is kept as originally written (rather than calling walk_tbs)
 /// so the compiled v2 circuits, and their verification keys, do not change.
