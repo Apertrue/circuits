@@ -31,6 +31,7 @@ jobs:
           - cert_binding
           - proof_a_ecdsa_p256_v2
           - proof_a_ecdsa_p384_v2
+          - proof_a_ecdsa_p384_sha384_v2
           - proof_b_es256_v2_core
           - proof_b_es256_v2
           - proof_b_es256_v2_large

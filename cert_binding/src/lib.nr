@@ -29,8 +29,10 @@
 /// - Dates before 1970-01-01 are rejected (unix time is unsigned here).
 
 use dep::sha256::sha256_var;
+use dep::sha512::{sha384::sha384_var, sha512::sha512_var};
 
 pub mod test_vectors;
+pub mod synthetic_vectors;
 
 /// Uncompressed P-256 SubjectPublicKeyInfo header (27 bytes), followed by
 /// X (32 bytes) and Y (32 bytes).
@@ -132,7 +134,135 @@ fn read_time<let N: u32>(tbs: [u8; N], tbs_len: u32, p: u32) -> (u64, u32) {
     (days * 86400 + hour * 3600 + minute * 60 + second, end)
 }
 
+/// Field locations found by walking a DER TBSCertificate from offset 0.
+/// All offsets are derived from the DER; none are prover-supplied.
+pub struct TbsWalk {
+    /// Content of the TBS `signature` AlgorithmIdentifier: [sig_alg_start, sig_alg_end)
+    pub sig_alg_start: u32,
+    pub sig_alg_end: u32,
+    /// First byte of subjectPublicKeyInfo
+    pub spki_start: u32,
+    pub not_before: u64,
+    pub not_after: u64,
+}
+
+/// Walk a DER TBSCertificate from offset 0 up to subjectPublicKeyInfo.
+/// Does not hash; the caller must hash tbs[0..tbs_len] and use that digest
+/// as the message of the issuer signature check.
+pub fn walk_tbs<let N: u32>(tbs: [u8; N], tbs_len: u32) -> TbsWalk {
+    assert(tbs_len <= N, "tbs_len exceeds buffer");
+
+    // Outer SEQUENCE must cover exactly tbs_len bytes.
+    let (body, outer_end) = read_tlv(tbs, tbs_len, 0, 0x30);
+    assert(outer_end == tbs_len, "DER: TBS SEQUENCE does not span tbs_len");
+
+    // Optional [0] EXPLICIT version.
+    let mut p = body;
+    if tbs[p] == 0xa0 {
+        let (_, e) = read_tlv(tbs, tbs_len, p, 0xa0);
+        p = e;
+    }
+    // serialNumber, signature AlgorithmIdentifier, issuer
+    let (_, e1) = read_tlv(tbs, tbs_len, p, 0x02);
+    let (sig_alg_start, e2) = read_tlv(tbs, tbs_len, e1, 0x30);
+    let (_, e3) = read_tlv(tbs, tbs_len, e2, 0x30);
+
+    // validity
+    let (vs, ve) = read_tlv(tbs, tbs_len, e3, 0x30);
+    let (not_before, t1) = read_time(tbs, tbs_len, vs);
+    let (not_after, t2) = read_time(tbs, tbs_len, t1);
+    assert(t2 == ve, "DER: Validity length mismatch");
+
+    // subject
+    let (_, e5) = read_tlv(tbs, tbs_len, ve, 0x30);
+
+    TbsWalk { sig_alg_start, sig_alg_end: e2, spki_start: e5, not_before, not_after }
+}
+
+/// Read an uncompressed P-256 SubjectPublicKeyInfo at spki_start.
+pub fn read_p256_spki<let N: u32>(tbs: [u8; N], tbs_len: u32, spki_start: u32) -> ([u8; 32], [u8; 32]) {
+    assert(spki_start + 91 <= tbs_len, "SPKI exceeds tbs_len");
+    for i in 0..27 {
+        assert(tbs[spki_start + i] == SPKI_P256_PREFIX[i], "SPKI is not uncompressed P-256");
+    }
+    let mut pubkey_x: [u8; 32] = [0; 32];
+    let mut pubkey_y: [u8; 32] = [0; 32];
+    for i in 0..32 {
+        pubkey_x[i] = tbs[spki_start + 27 + i];
+        pubkey_y[i] = tbs[spki_start + 59 + i];
+    }
+    (pubkey_x, pubkey_y)
+}
+
+/// Assert that the TBS `signature` AlgorithmIdentifier content is exactly
+/// `expected` (the DER bytes inside the AlgorithmIdentifier SEQUENCE).
+pub fn assert_sig_alg<let N: u32, let K: u32>(tbs: [u8; N], w: TbsWalk, expected: [u8; K]) {
+    assert(w.sig_alg_end - w.sig_alg_start == K, "TBS signature algorithm mismatch");
+    for i in 0..K {
+        assert(tbs[w.sig_alg_start + i] == expected[i], "TBS signature algorithm mismatch");
+    }
+}
+
+/// DER content of AlgorithmIdentifier for ecdsa-with-SHA256/384/512
+/// (OID 1.2.840.10045.4.3.2/3/4, parameters absent).
+pub global ALG_ECDSA_SHA256: [u8; 10] = [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02];
+pub global ALG_ECDSA_SHA384: [u8; 10] = [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x03];
+pub global ALG_ECDSA_SHA512: [u8; 10] = [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x04];
+
+/// SHA-384 of tbs[0..tbs_len]. Bytes past tbs_len are zeroed by
+/// BoundedVec::from_parts, so prover padding cannot affect the digest.
+pub fn tbs_sha384<let N: u32>(tbs: [u8; N], tbs_len: u32) -> [u8; 48] {
+    sha384_var(BoundedVec::from_parts(tbs, tbs_len))
+}
+
+/// SHA-512 of tbs[0..tbs_len] (same padding rule as tbs_sha384).
+pub fn tbs_sha512<let N: u32>(tbs: [u8; N], tbs_len: u32) -> [u8; 64] {
+    sha512_var(BoundedVec::from_parts(tbs, tbs_len))
+}
+
+/// A P-256 leaf whose issuer signed with ecdsa-with-SHA384.
+pub struct LeafCertSha384 {
+    pub sha384: [u8; 48],
+    pub pubkey_x: [u8; 32],
+    pub pubkey_y: [u8; 32],
+    pub not_before: u64,
+    pub not_after: u64,
+}
+
+/// A P-256 leaf whose issuer signed with ecdsa-with-SHA512.
+pub struct LeafCertSha512 {
+    pub sha512: [u8; 64],
+    pub pubkey_x: [u8; 32],
+    pub pubkey_y: [u8; 32],
+    pub not_before: u64,
+    pub not_after: u64,
+}
+
+/// Hash (SHA-384) and parse a DER TBSCertificate whose subject key is P-256
+/// and whose TBS signature algorithm is ecdsa-with-SHA384.
+pub fn bind_leaf_cert_sha384<let N: u32>(tbs: [u8; N], tbs_len: u32) -> LeafCertSha384 {
+    assert(tbs_len <= N, "tbs_len exceeds buffer");
+    let sha384 = tbs_sha384(tbs, tbs_len);
+    let w = walk_tbs(tbs, tbs_len);
+    assert_sig_alg(tbs, w, ALG_ECDSA_SHA384);
+    let (pubkey_x, pubkey_y) = read_p256_spki(tbs, tbs_len, w.spki_start);
+    LeafCertSha384 { sha384, pubkey_x, pubkey_y, not_before: w.not_before, not_after: w.not_after }
+}
+
+/// Hash (SHA-512) and parse a DER TBSCertificate whose subject key is P-256
+/// and whose TBS signature algorithm is ecdsa-with-SHA512.
+pub fn bind_leaf_cert_sha512<let N: u32>(tbs: [u8; N], tbs_len: u32) -> LeafCertSha512 {
+    assert(tbs_len <= N, "tbs_len exceeds buffer");
+    let sha512 = tbs_sha512(tbs, tbs_len);
+    let w = walk_tbs(tbs, tbs_len);
+    assert_sig_alg(tbs, w, ALG_ECDSA_SHA512);
+    let (pubkey_x, pubkey_y) = read_p256_spki(tbs, tbs_len, w.spki_start);
+    LeafCertSha512 { sha512, pubkey_x, pubkey_y, not_before: w.not_before, not_after: w.not_after }
+}
+
 /// Hash and parse a DER TBSCertificate whose subject key is P-256.
+/// This body is kept as originally written (rather than calling walk_tbs)
+/// so the compiled v2 circuits, and their verification keys, do not change.
 pub fn bind_leaf_cert<let N: u32>(tbs: [u8; N], tbs_len: u32) -> LeafCert {
     assert(tbs_len <= N, "tbs_len exceeds buffer");
     let sha256: [u8; 32] = sha256_var(tbs, tbs_len);
@@ -181,8 +311,9 @@ pub fn bind_leaf_cert<let N: u32>(tbs: [u8; N], tbs_len: u32) -> LeafCert {
 // ====================================================================
 
 mod tests {
-    use super::{bind_leaf_cert, days_from_civil, LeafCert};
+    use super::{bind_leaf_cert, bind_leaf_cert_sha384, days_from_civil, LeafCert};
     use super::test_vectors as tv;
+    use super::synthetic_vectors as sv;
 
     global BUF: u32 = 1280;
 
@@ -360,5 +491,30 @@ mod tests {
         assert(off != 0);
         t[off + 22] = 0x22;
         let _ = bind_leaf_cert(t, tv::SAMSUNG_LEAF_TBS_LEN);
+    }
+
+    #[test]
+    fn test_sha384_leaf_binds() {
+        let c = bind_leaf_cert_sha384(pad(sv::SYN_P384_SHA384_LEAF_TBS), sv::SYN_P384_SHA384_LEAF_TBS_LEN);
+        assert(c.sha384 == sv::SYN_P384_SHA384_LEAF_SHA384, "sha384 mismatch");
+        assert(c.pubkey_x == sv::SYN_P384_SHA384_LEAF_PUB_X);
+        assert(c.pubkey_y == sv::SYN_P384_SHA384_LEAF_PUB_Y);
+        assert(c.not_before == sv::SYN_P384_SHA384_LEAF_NOT_BEFORE);
+        assert(c.not_after == sv::SYN_P384_SHA384_LEAF_NOT_AFTER);
+    }
+
+    #[test]
+    fn test_sha384_padding_does_not_affect_hash() {
+        let mut t = pad(sv::SYN_P384_SHA384_LEAF_TBS);
+        t[sv::SYN_P384_SHA384_LEAF_TBS_LEN] = 0xff;
+        t[1279] = 0x01;
+        let c = bind_leaf_cert_sha384(t, sv::SYN_P384_SHA384_LEAF_TBS_LEN);
+        assert(c.sha384 == sv::SYN_P384_SHA384_LEAF_SHA384);
+    }
+
+    #[test(should_fail_with = "TBS signature algorithm mismatch")]
+    fn test_sha384_rejects_sha256_signed_leaf() {
+        // Samsung leaf is signed ecdsa-with-SHA256; the SHA-384 path must refuse it.
+        let _ = bind_leaf_cert_sha384(pad(tv::SAMSUNG_LEAF_TBS), tv::SAMSUNG_LEAF_TBS_LEN);
     }
 }
