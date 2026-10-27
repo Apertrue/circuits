@@ -1,0 +1,9 @@
+[package]
+name = "cert_binding"
+type = "lib"
+authors = ["Apertrue"]
+compiler_version = ">=1.0.0"
+description = "Binds a leaf P-256 key and validity dates to the SHA-256 of a DER TBSCertificate"
+
+[dependencies]
+sha256 = { tag = "v0.3.0", git = "https://github.com/noir-lang/sha256" }
